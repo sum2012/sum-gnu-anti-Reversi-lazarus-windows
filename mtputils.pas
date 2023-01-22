@@ -1,18 +1,15 @@
-{ Utilities using light weight threads.
-
+{
+ **********************************************************************
   This file is part of the Free Pascal run time library.
+
+  See the file COPYING.FPC, included in this distribution,
+  for details about the license.
+ **********************************************************************
+
+  Utilities using light weight threads.
 
   Copyright (C) 2008 Mattias Gaertner mattias@freepascal.org
 
-  See the file COPYING.FPC, included in this distribution,
-  for details about the copyright.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-
- **********************************************************************}
-{
   Abstract:
     Utility functions using mtprocs.
     For example a parallel sort.
@@ -201,12 +198,7 @@ begin
   //WriteLn('TParallelSortPointerList.Sort BlockCnt=',BlockCnt,' fBlockSize=',fBlockSize,' fBlockCntPowOf2Offset=',fBlockCntPowOf2Offset);
   GetMem(FMergeBuffer,SizeOf(Pointer)*Count);
   try
-    ProcThreadPool.DoParallel(@MTPSort,0,BlockCnt-1,self);
-//    ProcThreadPool.DoParallel(@MTPSort,0,BlockCnt-1);
-//procedure DoParallel(const AProc: TMTProcedure;
-//      StartIndex, EndIndex: PtrInt;
-//      Data: Pointer ; MaxThreads: PtrInt = 0); inline;
-
+    ProcThreadPool.DoParallel(@MTPSort,0,BlockCnt-1);
   finally
     FreeMem(FMergeBuffer);
     FMergeBuffer:=nil;
