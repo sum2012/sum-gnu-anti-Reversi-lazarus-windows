@@ -13,23 +13,23 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v2
 
-    - name: Cache Lazarus Packages
-      uses: actions/cache@v2
-      with:
-        path: C:\Program Files (x86)\Lazarus\packager\units\i386-win32
-        key: ${{ runner.os }}-lazarus-${{ hashFiles('**/SumAntiReversi8x8.lpi') }}
+      - name: Cache Lazarus Packages
+        uses: actions/cache@v2
+        with:
+          path: C:\Program Files (x86)\Lazarus\packager\units\i386-win32
+          key: ${{ runner.os }}-lazarus-${{ hashFiles('**/SumAntiRevseri8x8.lpi') }}
         restore-keys: |
           ${{ runner.os }}-lazarus-
 
-    - name: Install Lazarus
-      uses: gcarreno/setup-lazarus@v3.2
-      with:
-        lazarus-version: '2.0.12'
-        include-packages: 'Synapse 40.1'
-        with-cache: true
+      - name: Install Lazarus
+        uses: gcarreno/setup-lazarus@v3.2
+        with:
+          lazarus-version: '2.0.12'
+          include-packages: 'Synapse 40.1'
+          with-cache: true
 
-    - name: Build Program
-      run: lazbuild SumAntiReversi8x8.lpi
-     AADSD
+      - name: Build Program
+        run: lazbuild SumAntiReversi8x8.lpi
+  
