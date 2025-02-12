@@ -1,4 +1,4 @@
-name: Build Windows Program
+name: Lazarus Build for Windows
 
 on:
   push:
@@ -11,20 +11,27 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v2
-      - name: Cache Lazarus Packages
-        uses: actions/cache@v2
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Lazarus
+        run: |
+          # Download and install Lazarus
+          choco install lazarus -y
+          # Add Lazarus to PATH
+          echo "C:\Program Files (x86)\Lazarus" >> $env:GITHUB_PATH
+
+      - name: Build Lazarus Project
+        run: |
+          # Navigate to the project directory
+          cd ${{ github.workspace }}
+          # Build the project using Lazarus
+          lazbuild.exe --cpu=x86_64 --os=win64 --build-mode=Release --build-compiler=fpc --build-config=Release --build-profile=Release --build-flags="-dRelease" --build-target=win64 --build-output-dir="bin" "SumAntiReversi8x8.lpi"
+
+      - name: Archive build artifacts
+        uses: actions/upload-artifact@v3
         with:
-          path: C:\Program Files (x86)\Lazarus\packager\units\i386-win32
-          key: ${{ runner.os }}-lazarus-${{ hashFiles('**/SumAntiReversi8x8.lpi') }}
-          restore-keys: |
-            ${{ runner.os }}-lazarus-
-      - name: Install Lazarus
-        uses: gcarreno/setup-lazarus@v3.2
-        with:
-          lazarus-version: '2.0.12'
-          include-packages: 'Synapse 40.1'
-          with-cache: true
-      - name: Build Program
-        run: lazbuild SumAntiReversi8x8.lpi
+          name: Windows Build
+          path: bin/
