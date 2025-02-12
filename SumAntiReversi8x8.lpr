@@ -15,7 +15,7 @@
 //  newsgroup:news://my.newsgroup.com.hk/welcome.sum
 // forum http://home.i-cable.com/wu/
 // movedlist may be wrong need remove later
-
+ 
 program SumAntiReversi8x8;
 
 {$MODE Delphi}
