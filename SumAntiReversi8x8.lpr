@@ -1,4 +1,4 @@
-//   Copyright 2011,2012 by Wu Hon Sum
+//   Copyright 2011-2026 by Wu Hon Sum
 //   This program is free software: you can redistribute it and/or modify
 //    it under the terms of the GNU General Public License as published by
 //    the Free Software Foundation, either version 3 of the License, or
@@ -15,18 +15,19 @@
 //  newsgroup:news://my.newsgroup.com.hk/welcome.sum
 // forum http://home.i-cable.com/wu/
 // movedlist may be wrong need remove later
-
+ 
 program SumAntiReversi8x8;
 
 {$MODE Delphi}
 
 uses
-  Forms, Interfaces,
+  Forms, Interfaces, LCLIntf,
   Unit1 in 'Unit1.pas' {Form1};
 
 {$R *.res}
 
 begin
+  Application.Scaled := True;
   Application.Initialize;
   Application.CreateForm(TForm1, Form1);
   Application.Run;
