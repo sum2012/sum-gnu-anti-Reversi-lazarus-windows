@@ -18,14 +18,28 @@ __device__ int evaluate_board_internal(const signed char board[100], int side_is
     }
 
     int result = 0;
-    if (red_score + black_score < 59) {
+    if (red_score + black_score <= 59) {
         result = black_score - red_score;
 
-        for (int i = 1; i <= 8; ++i) {
-            for (int j = 1; j <= 8; ++j) {
-                result += (int)board[i * 10 + j] * c_posmark[i * 10 + j];
-            }
-        }
+        if (board[1 * 10 + 1] == 0)
+            result += (int)board[2 * 10 + 1] * c_posmark[2 * 10 + 1] + (int)board[1 * 10 + 2] * c_posmark[1 * 10 + 2];
+        else
+            result += (int)board[1 * 10 + 1] * c_posmark[1 * 10 + 1];
+
+        if (board[8 * 10 + 1] == 0)
+            result += (int)board[7 * 10 + 1] * c_posmark[7 * 10 + 1] + (int)board[8 * 10 + 2] * c_posmark[8 * 10 + 2];
+        else
+            result += (int)board[8 * 10 + 1] * c_posmark[8 * 10 + 1];
+
+        if (board[1 * 10 + 8] == 0)
+            result += (int)board[1 * 10 + 7] * c_posmark[1 * 10 + 7] + (int)board[2 * 10 + 8] * c_posmark[2 * 10 + 8];
+        else
+            result += (int)board[1 * 10 + 8] * c_posmark[1 * 10 + 8];
+
+        if (board[8 * 10 + 8] == 0)
+            result += (int)board[8 * 10 + 7] * c_posmark[8 * 10 + 7] + (int)board[7 * 10 + 8] * c_posmark[7 * 10 + 8];
+        else
+            result += (int)board[8 * 10 + 8] * c_posmark[8 * 10 + 8];
 
         if (!side_is_red) result = -result;
     } else {

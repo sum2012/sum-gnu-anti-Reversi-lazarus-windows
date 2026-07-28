@@ -606,11 +606,12 @@ begin
     res := cuMemcpyDtoH(@h_results[0], results_ptr, num_boards * SizeOf(Integer));
     if res <> CUDA_SUCCESS then
     begin
+       ShowMessage('CUDA: BatchEvaluateOnGPU failed at memcpy: ' + IntToStr(res));
        for i := 0 to num_boards - 1 do
          Scores[i] := EvaluateScore(Boards[i], SideIsRed);
-       exit;
-    end;
-    Move(h_results[0], Scores[0], num_boards * SizeOf(Integer));
+    end
+    else
+      Move(h_results[0], Scores[0], num_boards * SizeOf(Integer));
 
     system.EnterCriticalSection(MyCriticalSection);
     FGpuEvalCount := FGpuEvalCount + num_boards;
@@ -681,6 +682,7 @@ begin
     res := cuMemcpyDtoH(@h_results[0], results_ptr, num_boards * SizeOf(Integer));
     if res <> CUDA_SUCCESS then
     begin
+       ShowMessage('CUDA: BatchSearchOnGPU failed at memcpy: ' + IntToStr(res));
        for i := 0 to num_boards - 1 do
          Scores[i] := EvaluateScore(Boards[i], SideIsRed);
        exit;
@@ -752,6 +754,7 @@ var
   PTXFile: TStringList;
   const_ptr: CUdeviceptr;
   const_size: NativeUInt;
+  res: CUresult;
 begin
   if TMenuItem(Sender).Checked then
   begin
@@ -777,7 +780,7 @@ begin
     end;
 
     // Increase stack size to 4KB for recursive alphabeta search
-    cuCtxSetLimit(CU_LIMIT_STACK_SIZE, 4096);
+    cuCtxSetLimit(CU_LIMIT_STACK_SIZE, 8192); // Increased for deep search
 
     // In a real scenario, we'd load the PTX from a file or resource.
     // For this implementation, we expect 'eval_kernel.ptx' to exist.
@@ -808,11 +811,34 @@ begin
 
     if FCudaEnabled then
     begin
-       // Allocate persistent buffers for 1 Million boards
-       FGpuBufSize := 1000000 * 100 * SizeOf(Integer);
-       cuMemAlloc(FGpuBoardsBuf, FGpuBufSize);
-       cuMemAlloc(FGpuResultsBuf, 1000000 * SizeOf(Integer));
-       cuMemAlloc(FGpuTransposedBuf, FGpuBufSize);
+       // Allocate persistent buffers for 100k boards (plenty for depth 15 batching)
+       FGpuBufSize := 100000 * 100 * SizeOf(Integer);
+       res := cuMemAlloc(FGpuBoardsBuf, FGpuBufSize);
+       if res <> CUDA_SUCCESS then
+       begin
+         ShowMessage('CUDA: Failed to allocate FGpuBoardsBuf: ' + IntToStr(res));
+         FCudaEnabled := False;
+         exit;
+       end;
+
+       res := cuMemAlloc(FGpuResultsBuf, 100000 * SizeOf(Integer));
+       if res <> CUDA_SUCCESS then
+       begin
+         ShowMessage('CUDA: Failed to allocate FGpuResultsBuf: ' + IntToStr(res));
+         cuMemFree(FGpuBoardsBuf);
+         FCudaEnabled := False;
+         exit;
+       end;
+
+       res := cuMemAlloc(FGpuTransposedBuf, FGpuBufSize);
+       if res <> CUDA_SUCCESS then
+       begin
+         ShowMessage('CUDA: Failed to allocate FGpuTransposedBuf: ' + IntToStr(res));
+         cuMemFree(FGpuBoardsBuf);
+         cuMemFree(FGpuResultsBuf);
+         FCudaEnabled := False;
+         exit;
+       end;
 
        // Set constant memory weights
        if cuModuleGetGlobal(const_ptr, const_size, FCudaModule, 'c_posmark') = CUDA_SUCCESS then
@@ -4695,16 +4721,28 @@ begin
 end;
 
 function Tform1.EvaluateScore(const Aboard:Tboard;const SideIsRed:Boolean):Integer;
-var a,b,i,j:integer;
+var a,b:integer;
 begin
   a:=0;
   b:=0;
   Score(Aboard,a,b);
-  if a+b < 59 then begin
-    Result := b - a;
-    for i := 1 to 8 do
-      for j := 1 to 8 do
-        Result := Result + Aboard[i][j] * PosMark[i][j];
+  if a+b <= 59 then begin
+    if aboard[1][1] = 0 then
+      Result:= b-a+aboard[2][1]*posmark[2][1]+aboard[1][2]*posmark[1][2]
+    else
+      Result:= b-a+aboard[1][1]*posmark[1][1];
+    if aboard[8][1] = 0 then
+      Result:= Result+aboard[7][1]*posmark[7][1]+aboard[8][2]*posmark[8][2]
+    else
+      Result:= Result+aboard[8][1]*posmark[8][1];
+    if aboard[1][8] = 0 then
+      Result:= Result+aboard[1][7]*posmark[1][7]+aboard[2][8]*posmark[2][8]
+    else
+      Result:= Result+aboard[1][8]*posmark[1][8];
+    if aboard[8][8] = 0 then
+      Result:= Result+aboard[8][7]*posmark[8][7]+aboard[7][8]*posmark[7][8]
+    else
+      Result:= Result+aboard[8][8]*posmark[8][8];
 
     if  not SideIsRed then
       Result:= -Result;
