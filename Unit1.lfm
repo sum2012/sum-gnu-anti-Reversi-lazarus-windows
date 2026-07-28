@@ -13211,7 +13211,7 @@ object Form1: TForm1
       OnClick = TojavaboardbuttonClick
     end
     object CudaMenu: TMenuItem
-      Caption = 'Betchmark'
+      Caption = 'CUDA option'
       object CudaEnabledMenuItem: TMenuItem
         AutoCheck = True
         Caption = 'Enable CUDA'

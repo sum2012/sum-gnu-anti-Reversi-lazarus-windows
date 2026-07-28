@@ -265,6 +265,8 @@ type
       function MutiMinMax(Aboard:Tboard;const SideIsRed:Boolean;const depth:integer;var aithinkstep:string):integer;
       procedure BatchEvaluateOnGPU(const Boards: array of Tboard; const SideIsRed: Boolean; var Scores: array of Integer);
       procedure BatchSearchOnGPU(const Boards: array of Tboard; const Depth: Integer; const SideIsRed: Boolean; const Color: Integer; var Scores: array of Integer);
+      function DetectCudaVersion(var Version: Integer): Boolean;
+      procedure ToggleCuda(Enabled: Boolean; ShowErrors: Boolean);
     { Private declarations }
   public
     { Public declarations }
@@ -348,7 +350,7 @@ implementation
 
 
 procedure TForm1.FormCreate(Sender: TObject);
-var a,b:integer;
+var a,b,CudaVersion:integer;
 begin
   mutitemplist := Tstringlist.Create;
   mutisteplist := Tstringlist.Create;
@@ -359,6 +361,13 @@ begin
   FCudaFunc := nil;
   FCudaSearchFunc := nil;
   FGpuEvalCount := 0;
+
+  // Auto-detect and enable CUDA 12.6 or above
+  if DetectCudaVersion(CudaVersion) then
+  begin
+    if CudaVersion >= 12060 then
+      ToggleCuda(True, False);
+  end;
 
   system.InitCriticalSection(MyCriticalSection);
  randomize;
@@ -749,6 +758,27 @@ begin
 end;
 
 procedure TForm1.CudaEnabledMenuItemClick(Sender: TObject);
+begin
+  ToggleCuda(TMenuItem(Sender).Checked, True);
+end;
+
+function TForm1.DetectCudaVersion(var Version: Integer): Boolean;
+var
+  res: CUresult;
+begin
+  Result := False;
+  Version := 0;
+  if not InitCuda then exit;
+
+  if Assigned(cuDriverGetVersion) then
+  begin
+    res := cuDriverGetVersion(Version);
+    if res = CUDA_SUCCESS then
+      Result := True;
+  end;
+end;
+
+procedure TForm1.ToggleCuda(Enabled: Boolean; ShowErrors: Boolean);
 var
   dev: CUdevice;
   PTXFile: TStringList;
@@ -756,34 +786,32 @@ var
   const_size: NativeUInt;
   res: CUresult;
 begin
-  if TMenuItem(Sender).Checked then
+  if Enabled then
   begin
     if not InitCuda then
     begin
-      ShowMessage('CUDA initialization failed. Make sure nvcuda.dll is in your system path.');
-      TMenuItem(Sender).Checked := False;
+      if ShowErrors then ShowMessage('CUDA initialization failed. Make sure nvcuda.dll is in your system path.');
+      CudaEnabledMenuItem.Checked := False;
       exit;
     end;
 
     if cuDeviceGet(dev, 0) <> CUDA_SUCCESS then
     begin
-      ShowMessage('No CUDA device found.');
-      TMenuItem(Sender).Checked := False;
+      if ShowErrors then ShowMessage('No CUDA device found.');
+      CudaEnabledMenuItem.Checked := False;
       exit;
     end;
 
     if cuCtxCreate(FCudaContext, 0, dev) <> CUDA_SUCCESS then
     begin
-      ShowMessage('Failed to create CUDA context.');
-      TMenuItem(Sender).Checked := False;
+      if ShowErrors then ShowMessage('Failed to create CUDA context.');
+      CudaEnabledMenuItem.Checked := False;
       exit;
     end;
 
-    // Increase stack size to 4KB for recursive alphabeta search
-    cuCtxSetLimit(CU_LIMIT_STACK_SIZE, 8192); // Increased for deep search
+    // Increase stack size to 8KB for recursive alphabeta search
+    cuCtxSetLimit(CU_LIMIT_STACK_SIZE, 8192);
 
-    // In a real scenario, we'd load the PTX from a file or resource.
-    // For this implementation, we expect 'eval_kernel.ptx' to exist.
     if FileExists('eval_kernel.ptx') then
     begin
       PTXFile := TStringList.Create;
@@ -791,8 +819,11 @@ begin
         PTXFile.LoadFromFile('eval_kernel.ptx');
         if not LoadKernel(PTXFile.Text, 'evaluate_boards', FCudaModule, FCudaFunc) then
         begin
-           ShowMessage('Failed to load CUDA kernel from eval_kernel.ptx');
-           TMenuItem(Sender).Checked := False;
+           if ShowErrors then ShowMessage('Failed to load CUDA kernel from eval_kernel.ptx');
+           CudaEnabledMenuItem.Checked := False;
+           cuCtxDestroy(FCudaContext);
+           FCudaContext := nil;
+           exit;
         end;
 
         if FCudaModule <> nil then
@@ -803,46 +834,59 @@ begin
     end
     else
     begin
-      ShowMessage('eval_kernel.ptx not found. Please compile eval_kernel.cu with nvcc.');
-      TMenuItem(Sender).Checked := False;
+      if ShowErrors then ShowMessage('eval_kernel.ptx not found. Please compile eval_kernel.cu with nvcc.');
+      CudaEnabledMenuItem.Checked := False;
+      cuCtxDestroy(FCudaContext);
+      FCudaContext := nil;
+      exit;
     end;
 
-    FCudaEnabled := TMenuItem(Sender).Checked;
+    FCudaEnabled := True;
+    CudaEnabledMenuItem.Checked := True;
 
     if FCudaEnabled then
     begin
-       // Allocate persistent buffers for 100k boards (plenty for depth 15 batching)
+       // Allocate persistent buffers for 100k boards
        FGpuBufSize := 100000 * 100 * SizeOf(Integer);
        res := cuMemAlloc(FGpuBoardsBuf, FGpuBufSize);
        if res <> CUDA_SUCCESS then
        begin
-         ShowMessage('CUDA: Failed to allocate FGpuBoardsBuf: ' + IntToStr(res));
+         if ShowErrors then ShowMessage('CUDA: Failed to allocate FGpuBoardsBuf: ' + IntToStr(res));
          FCudaEnabled := False;
+         CudaEnabledMenuItem.Checked := False;
          exit;
        end;
 
        res := cuMemAlloc(FGpuResultsBuf, 100000 * SizeOf(Integer));
        if res <> CUDA_SUCCESS then
        begin
-         ShowMessage('CUDA: Failed to allocate FGpuResultsBuf: ' + IntToStr(res));
+         if ShowErrors then ShowMessage('CUDA: Failed to allocate FGpuResultsBuf: ' + IntToStr(res));
          cuMemFree(FGpuBoardsBuf);
+         FGpuBoardsBuf := 0;
          FCudaEnabled := False;
+         CudaEnabledMenuItem.Checked := False;
          exit;
        end;
 
        res := cuMemAlloc(FGpuTransposedBuf, FGpuBufSize);
        if res <> CUDA_SUCCESS then
        begin
-         ShowMessage('CUDA: Failed to allocate FGpuTransposedBuf: ' + IntToStr(res));
+         if ShowErrors then ShowMessage('CUDA: Failed to allocate FGpuTransposedBuf: ' + IntToStr(res));
          cuMemFree(FGpuBoardsBuf);
          cuMemFree(FGpuResultsBuf);
+         FGpuBoardsBuf := 0;
+         FGpuResultsBuf := 0;
          FCudaEnabled := False;
+         CudaEnabledMenuItem.Checked := False;
          exit;
        end;
 
        // Set constant memory weights
        if cuModuleGetGlobal(const_ptr, const_size, FCudaModule, 'c_posmark') = CUDA_SUCCESS then
           cuMemcpyHtoD(const_ptr, @PosMark[0,0], 100 * SizeOf(Integer));
+
+       // Disable CPU parallelization
+       ProcThreadPool.MaxThreadCount := 1;
     end;
   end
   else
@@ -851,10 +895,20 @@ begin
     if FGpuResultsBuf <> 0 then cuMemFree(FGpuResultsBuf);
     if FGpuTransposedBuf <> 0 then cuMemFree(FGpuTransposedBuf);
     FGpuBoardsBuf := 0;
+    FGpuResultsBuf := 0;
+    FGpuTransposedBuf := 0;
 
     if FCudaContext <> nil then
       cuCtxDestroy(FCudaContext);
+    FCudaContext := nil;
+    FCudaModule := nil;
+    FCudaFunc := nil;
+    FCudaSearchFunc := nil;
     FCudaEnabled := False;
+    CudaEnabledMenuItem.Checked := False;
+
+    // Restore CPU parallelization
+    ProcThreadPool.MaxThreadCount := GetSystemThreadCount;
   end;
 end;
 

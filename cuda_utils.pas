@@ -35,6 +35,7 @@ type
 
 var
   cuInit: function(Flags: Cardinal): CUresult; stdcall;
+  cuDriverGetVersion: function(var driverVersion: Integer): CUresult; stdcall;
   cuDeviceGet: function(var device: CUdevice; ordinal: Integer): CUresult; stdcall;
   cuCtxCreate: function(var pctx: CUcontext; flags: Cardinal; dev: CUdevice): CUresult; stdcall;
   cuModuleLoadData: function(var module: CUmodule; image: Pointer): CUresult; stdcall;
@@ -69,7 +70,9 @@ begin
   if CudaLib <> 0 then
   begin
     @cuInit := GetProcAddress(CudaLib, 'cuInit');
+    @cuDriverGetVersion := GetProcAddress(CudaLib, 'cuDriverGetVersion');
     @cuDeviceGet := GetProcAddress(CudaLib, 'cuDeviceGet');
+    // ...
     @cuCtxCreate := GetProcAddress(CudaLib, 'cuCtxCreate');
     @cuModuleLoadData := GetProcAddress(CudaLib, 'cuModuleLoadData');
     @cuModuleGetFunction := GetProcAddress(CudaLib, 'cuModuleGetFunction');

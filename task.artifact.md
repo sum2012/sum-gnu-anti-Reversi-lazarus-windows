@@ -1,8 +1,0 @@
-- [x] Fix `MutiMinMax` Turbo Boost pass handling and fallback evaluation in `Unit1.pas`
-- [x] Fix benchmark side detection logic in `CudaStressTestClick` in `Unit1.pas`
-- [x] Synchronize CUDA kernel logic with Pascal engine (`eval_kernel.cu`)
-    - [x] Update `INF` to 10000
-    - [x] Add win/loss piece count check to `alphabeta`
-    - [x] Align pass handling (do not decrease depth)
-    - [x] Add endgame check (> 63 pieces)
-- [ ] Verify fixes with Benchmark tool
