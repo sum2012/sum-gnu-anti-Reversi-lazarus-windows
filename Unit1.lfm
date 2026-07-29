@@ -12945,7 +12945,7 @@ object Form1: TForm1
   object AIDisplayScoreLabel: TLabel
     Left = 144
     Height = 20
-    Top = 549
+    Top = 552
     Width = 9
     Caption = '0'
     ParentColor = False
@@ -13069,7 +13069,7 @@ object Form1: TForm1
     Top = 604
     Width = 62
     TabOrder = 6
-    Text = '5'
+    Text = '7'
   end
   object EndgameDepth: TEdit
     Left = 1020

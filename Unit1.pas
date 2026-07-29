@@ -366,7 +366,11 @@ begin
   if DetectCudaVersion(CudaVersion) then
   begin
     if CudaVersion >= 12060 then
+    begin
       ToggleCuda(True, False);
+      NornalDepth.Text:= '8';
+      EndgameDepth.Text:= '14';
+    end;
   end;
 
   system.InitCriticalSection(MyCriticalSection);
@@ -516,9 +520,31 @@ mutiscorelist.clear;
 //mutitemplist.free;
 //mutiscorelist.free;
 end;
-var a,b,c,tempdepth:integer;
+var a,b,c,tempdepth:integer;aibestmove: string;
 begin
   Result := '';
+  if FCudaEnabled then
+  begin
+     aibestmove := '';
+     AiListBox.clear;
+     ThinkstepEdit.Text:= '';
+     tempdepth:= strToint(Endgamedepth.text);
+     score(board,a,b);
+     if a+b + tempdepth > 64 then
+       tempdepth:= 64-a-b
+     else
+       tempdepth:= strToint(Nornaldepth.Text);
+
+     a:=MutiMinMax(board, ComputerisRed, tempdepth, aibestmove);
+     AIDisplayScoreLabel.Caption:= inttostr(a);
+     aibestmove := copy(aibestmove,3,length(aibestmove)-2);
+     AiListBox.items.add(inttostr(a)+':'+aibestmove);
+     ThinkstepEdit.Text:= AiListBox.items[0];
+     a := strtoint(copy(aibestmove,1,1));
+     b := strtoint(copy(aibestmove,3,1));
+     Result := 'Image'+ inttostr(8*(b-1) +a);
+     exit;
+  end;
 //  mutisteplist := Tstringlist.Create;
 
     if ComputerIsRed = true then
@@ -744,6 +770,7 @@ begin
 
   StartTime := GetTickCount64;
   res_score := MutiMinMax(board, SideIsRed, depth, aithinkstep);
+  aithinkstep := copy(aithinkstep,3,length(aithinkstep)-3);
   EndTime := GetTickCount64;
 
   Elapsed := (EndTime - StartTime) / 1000;
