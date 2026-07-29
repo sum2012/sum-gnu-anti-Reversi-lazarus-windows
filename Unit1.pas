@@ -1,4 +1,4 @@
-﻿//   Copyright 2011,2012 by Wu Hon Sum
+﻿//   Copyright 2011-2026 by Wu Hon Sum
 //   This program is free software: you can redistribute it and/or modify
 //    it under the terms of the GNU General Public License as published by
 //    the Free Software Foundation, either version 3 of the License, or
@@ -23,8 +23,8 @@ unit Unit1;
 interface
 
 uses
-  SysUtils, Variants, Classes, Graphics, Controls, Forms,
-  Dialogs, ExtCtrls, StdCtrls, Menus,ComCtrls,MTProcs,lclintf,MTPCPU,ClipBrd;
+  Windows, SysUtils, Variants, Classes, Graphics, Controls, Forms,
+  Dialogs, ExtCtrls, StdCtrls, Menus,ComCtrls,MTProcs,lclintf,MTPCPU,ClipBrd, cuda_utils;
 
 const
   inf = 10000;
@@ -35,6 +35,10 @@ const
 type
   Tboard=array[0..9,0..9] of integer;
   Tmovelist = array[1..20] of integer;
+  TMoveArray = record
+    Count: Integer;
+    Moves: array[0..63] of Integer;
+  end;
 
 
 type
@@ -149,6 +153,10 @@ type
     Label7: TLabel;
     ScoreLabel: TLabel;
     AIDisplayScoreLabel: TLabel;
+    GpuEvalLabel: TLabel;
+    CudaMenu: TMenuItem;
+    CudaEnabledMenuItem: TMenuItem;
+    CudaStressTest: TMenuItem;
     Redlabel: TLabel;
     BlackLabel: TLabel;
     ProgressBar1: TProgressBar;
@@ -161,7 +169,11 @@ type
     Startposition6utton: TMenuItem;
     StopThinkButton: TMenuItem;
     Tojavaboardbutton: TMenuItem;
+    Timer1: TTimer;
+    procedure CudaEnabledMenuItemClick(Sender: TObject);
+    procedure CudaStressTestClick(Sender: TObject);
     procedure AboutButtonClick(Sender: TObject);
+    procedure Timer1Timer(Sender: TObject);
     procedure ComputerFirstButtonClick(Sender: TObject);
     procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
     procedure FormCreate(Sender: TObject);
@@ -220,6 +232,16 @@ type
       Redlist,Blacklist:TStringList;
       AiMovelist:string;
       movedlist:TStringList;
+      FCudaEnabled: Boolean;
+      FCudaContext: CUcontext;
+      FCudaModule: CUmodule;
+      FCudaFunc: CUfunction;
+      FCudaSearchFunc: CUfunction;
+      FGpuEvalCount: Int64;
+      FGpuBoardsBuf, FGpuResultsBuf, FGpuPosMarkBuf, FGpuTransposedBuf: CUdeviceptr;
+      FGpuBufSize: NativeUInt;
+      procedure FastMakeRedMove(const ABoard:Tboard; var temp:TMoveArray);
+      procedure FastMakeBlackMove(const ABoard:Tboard; var temp:TMoveArray);
       function Muti(const ComputerisRed:Boolean):string;
       procedure DoSomethingParallel(Index: PtrInt; Data: Pointer; Item: TMultiThreadProcItem);
       procedure MakeRedMove(const ABoard:Tboard;var temp:TStringList);
@@ -239,8 +261,12 @@ type
       function MutiMinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;var aithinkstep:string):integer;
       Procedure Scoresort(var scorelist:Tstringlist;var stepno:Tstringlist);
       function ThinkNumber(Aboard:Tboard;SideIsRed:Boolean;depth:integer):integer;
-      Function BoardtoFen:String;
+      function BoardtoFen:String;
       function MutiMinMax(Aboard:Tboard;const SideIsRed:Boolean;const depth:integer;var aithinkstep:string):integer;
+      procedure BatchEvaluateOnGPU(const Boards: array of Tboard; const SideIsRed: Boolean; var Scores: array of Integer);
+      procedure BatchSearchOnGPU(const Boards: array of Tboard; const Depth: Integer; const SideIsRed: Boolean; const Color: Integer; var Scores: array of Integer);
+      function DetectCudaVersion(var Version: Integer): Boolean;
+      procedure ToggleCuda(Enabled: Boolean; ShowErrors: Boolean);
     { Private declarations }
   public
     { Public declarations }
@@ -324,11 +350,28 @@ implementation
 
 
 procedure TForm1.FormCreate(Sender: TObject);
-var a,b:integer;
+var a,b,CudaVersion:integer;
 begin
   mutitemplist := Tstringlist.Create;
   mutisteplist := Tstringlist.Create;
   mutiscorelist := Tstringlist.Create;
+  FCudaEnabled := False;
+  FCudaContext := nil;
+  FCudaModule := nil;
+  FCudaFunc := nil;
+  FCudaSearchFunc := nil;
+  FGpuEvalCount := 0;
+
+  // Auto-detect and enable CUDA 12.6 or above
+  if DetectCudaVersion(CudaVersion) then
+  begin
+    if CudaVersion >= 12060 then
+    begin
+      ToggleCuda(True, False);
+      NornalDepth.Text:= '8';
+      EndgameDepth.Text:= '14';
+    end;
+  end;
 
   system.InitCriticalSection(MyCriticalSection);
  randomize;
@@ -367,6 +410,7 @@ function TForm1.Muti(const ComputerisRed:Boolean):String;
 function test(const depth:integer;const cuted:Boolean;const fullthink:boolean):string;
 var a,b,c,d,bestscore,cutnum:integer;templist,templist2:Tstringlist;OneDepthSideisRed:boolean;move,bestmove:string;//cut:Boolean;
 begin
+  Result := '';
   mutitemplist.clear;
   mutiscorelist.clear;
 // mutitemplist := Tstringlist.Create;
@@ -425,7 +469,17 @@ begin
      mutitemplist.Add(inttostr(a)+' '+templist[a]+' p');
 end;
 mutidepth:= depth;
-ProcThreadPool.DoParallel(DoSomethingParallel,0,mutitemplist.count-1,nil);// address, startindex, endindex, optional data,max thread
+
+if FCudaEnabled then
+begin
+  // Sequential loop for CUDA to avoid multi-thread overhead and noise
+  for a := 0 to mutitemplist.count - 1 do
+    DoSomethingParallel(a, nil, nil);
+end
+else begin
+  ProcThreadPool.DoParallel(DoSomethingParallel,0,mutitemplist.count-1,nil);// address, startindex, endindex, optional data,max thread
+end;
+
 for a:= 0 to mutiscorelist.count-1 do
    mutiscorelist[a] := inttostr(-strtoint(mutiscorelist[a]));
 scoresort(mutiscorelist,mutisteplist);
@@ -466,8 +520,33 @@ mutiscorelist.clear;
 //mutitemplist.free;
 //mutiscorelist.free;
 end;
-var a,b,c,tempdepth:integer;
+var a,b,c,tempdepth:integer;aibestmove: string;
 begin
+  Result := '';
+  if FCudaEnabled then
+  begin
+     aibestmove := '';
+     AiListBox.clear;
+     ThinkstepEdit.Text:= '';
+     FGpuEvalCount := 0;
+     Application.ProcessMessages;
+     tempdepth:= strToint(Endgamedepth.text);
+     score(board,a,b);
+     if a+b + tempdepth > 64 then
+       tempdepth:= 64-a-b
+     else
+       tempdepth:= strToint(Nornaldepth.Text);
+
+     a:=MutiMinMax(board, ComputerisRed, tempdepth, aibestmove);
+     AIDisplayScoreLabel.Caption:= inttostr(a);
+     aibestmove := copy(aibestmove,3,length(aibestmove)-2);
+     AiListBox.items.add(inttostr(a)+':'+aibestmove);
+     ThinkstepEdit.Text:= AiListBox.items[0];
+     a := strtoint(copy(aibestmove,1,1));
+     b := strtoint(copy(aibestmove,3,1));
+     Result := 'Image'+ inttostr(8*(b-1) +a);
+     exit;
+  end;
 //  mutisteplist := Tstringlist.Create;
 
     if ComputerIsRed = true then
@@ -508,6 +587,372 @@ begin
 end;
 
 
+
+procedure TForm1.BatchEvaluateOnGPU(const Boards: array of Tboard; const SideIsRed: Boolean; var Scores: array of Integer);
+var
+  num_boards, i, pos: Integer;
+  h_results, h_transposed: array of Integer;
+  side_val: Integer;
+  kernel_params: array[0..3] of Pointer;
+  res: CUresult;
+  boards_ptr, results_ptr: CUdeviceptr;
+begin
+  num_boards := Length(Boards);
+  if (FCudaFunc = nil) or (num_boards = 0) then exit;
+
+  SetLength(h_results, num_boards);
+  SetLength(h_transposed, num_boards * 100);
+  if SideIsRed then side_val := 1 else side_val := 0;
+
+  // Transpose board data for coalesced access: [pos * num_boards + idx]
+  for i := 0 to num_boards - 1 do
+    for pos := 0 to 99 do
+       h_transposed[pos * num_boards + i] := Boards[i][pos div 10, pos mod 10];
+
+  if (FGpuTransposedBuf <> 0) and (num_boards * 100 * SizeOf(Integer) <= FGpuBufSize) then
+  begin
+    boards_ptr := FGpuTransposedBuf;
+    results_ptr := FGpuResultsBuf;
+  end
+  else
+  begin
+    res := cuMemAlloc(boards_ptr, num_boards * 100 * SizeOf(Integer));
+    if res <> CUDA_SUCCESS then exit;
+    res := cuMemAlloc(results_ptr, num_boards * SizeOf(Integer));
+    if res <> CUDA_SUCCESS then begin cuMemFree(boards_ptr); exit; end;
+  end;
+
+  cuMemcpyHtoD(boards_ptr, @h_transposed[0], num_boards * 100 * SizeOf(Integer));
+
+  kernel_params[0] := @boards_ptr;
+  kernel_params[1] := @results_ptr;
+  kernel_params[2] := @num_boards;
+  kernel_params[3] := @side_val;
+
+  res := cuLaunchKernel(FCudaFunc, (num_boards + 255) div 256, 1, 1, 256, 1, 1, 0, nil, @kernel_params[0], nil);
+  if res <> CUDA_SUCCESS then
+  begin
+    system.EnterCriticalSection(MyCriticalSection);
+    FGpuEvalCount := -1000000;
+    system.LeaveCriticalSection(MyCriticalSection);
+    for i := 0 to num_boards - 1 do
+      Scores[i] := EvaluateScore(Boards[i], SideIsRed);
+  end
+  else
+  begin
+    res := cuMemcpyDtoH(@h_results[0], results_ptr, num_boards * SizeOf(Integer));
+    if res <> CUDA_SUCCESS then
+    begin
+       ShowMessage('CUDA: BatchEvaluateOnGPU failed at memcpy: ' + IntToStr(res));
+       for i := 0 to num_boards - 1 do
+         Scores[i] := EvaluateScore(Boards[i], SideIsRed);
+    end
+    else
+      Move(h_results[0], Scores[0], num_boards * SizeOf(Integer));
+
+    system.EnterCriticalSection(MyCriticalSection);
+    FGpuEvalCount := FGpuEvalCount + num_boards;
+    system.LeaveCriticalSection(MyCriticalSection);
+  end;
+
+  if boards_ptr <> FGpuTransposedBuf then
+  begin
+    cuMemFree(boards_ptr);
+    cuMemFree(results_ptr);
+  end;
+end;
+
+procedure TForm1.BatchSearchOnGPU(const Boards: array of Tboard; const Depth: Integer; const SideIsRed: Boolean; const Color: Integer; var Scores: array of Integer);
+var
+  num_boards, i, pos: Integer;
+  h_results, h_transposed: array of Integer;
+  side_val: Integer;
+  kernel_params: array[0..5] of Pointer;
+  res: CUresult;
+  boards_ptr, results_ptr: CUdeviceptr;
+begin
+  num_boards := Length(Boards);
+  if (FCudaSearchFunc = nil) or (num_boards = 0) then
+  begin
+    BatchEvaluateOnGPU(Boards, SideIsRed, Scores);
+    exit;
+  end;
+
+  SetLength(h_results, num_boards);
+  SetLength(h_transposed, num_boards * 100);
+  if SideIsRed then side_val := 1 else side_val := 0;
+
+  for i := 0 to num_boards - 1 do
+    for pos := 0 to 99 do
+       h_transposed[pos * num_boards + i] := Boards[i][pos div 10, pos mod 10];
+
+  if (FGpuTransposedBuf <> 0) and (num_boards * 100 * SizeOf(Integer) <= FGpuBufSize) then
+  begin
+    boards_ptr := FGpuTransposedBuf;
+    results_ptr := FGpuResultsBuf;
+  end
+  else
+  begin
+    res := cuMemAlloc(boards_ptr, num_boards * 100 * SizeOf(Integer));
+    if res <> CUDA_SUCCESS then exit;
+    res := cuMemAlloc(results_ptr, num_boards * SizeOf(Integer));
+    if res <> CUDA_SUCCESS then begin cuMemFree(boards_ptr); exit; end;
+  end;
+
+  cuMemcpyHtoD(boards_ptr, @h_transposed[0], num_boards * 100 * SizeOf(Integer));
+
+  kernel_params[0] := @boards_ptr;
+  kernel_params[1] := @results_ptr;
+  kernel_params[2] := @num_boards;
+  kernel_params[3] := @Depth;
+  kernel_params[4] := @side_val;
+  kernel_params[5] := @Color;
+
+  res := cuLaunchKernel(FCudaSearchFunc, (num_boards + 255) div 256, 1, 1, 256, 1, 1, 0, nil, @kernel_params[0], nil);
+  if res <> CUDA_SUCCESS then
+  begin
+    for i := 0 to num_boards - 1 do
+      Scores[i] := EvaluateScore(Boards[i], SideIsRed);
+  end
+  else
+  begin
+    res := cuMemcpyDtoH(@h_results[0], results_ptr, num_boards * SizeOf(Integer));
+    if res <> CUDA_SUCCESS then
+    begin
+       ShowMessage('CUDA: BatchSearchOnGPU failed at memcpy: ' + IntToStr(res));
+       for i := 0 to num_boards - 1 do
+         Scores[i] := EvaluateScore(Boards[i], SideIsRed);
+       exit;
+    end;
+    Move(h_results[0], Scores[0], num_boards * SizeOf(Integer));
+
+    system.EnterCriticalSection(MyCriticalSection);
+    // Rough estimate of nodes searched
+    FGpuEvalCount := FGpuEvalCount + Int64(num_boards) * (1 shl (Depth * 2));
+    system.LeaveCriticalSection(MyCriticalSection);
+  end;
+
+  if boards_ptr <> FGpuTransposedBuf then
+  begin
+    cuMemFree(boards_ptr);
+    cuMemFree(results_ptr);
+  end;
+end;
+
+
+procedure TForm1.CudaStressTestClick(Sender: TObject);
+var
+  StartTime, EndTime: QWord;
+  Elapsed: Double;
+  aithinkstep: string;
+  depth: Integer;
+  res_score: Integer;
+  SideIsRed: Boolean;
+  ColorName: string;
+begin
+  if not FCudaEnabled then
+  begin
+    ShowMessage('Please enable CUDA first.');
+    exit;
+  end;
+
+  // Determine whose turn it is based on move history
+  if (StepListBox.Items.Count mod 2 = 0) then
+    SideIsRed := FirstIsRed
+  else
+    SideIsRed := not FirstIsRed;
+
+  if SideIsRed then ColorName := 'Red' else ColorName := 'Black';
+
+  depth := StrToIntDef(NornalDepth.Text, 7);
+  FGpuEvalCount := 0;
+  aithinkstep := '';
+
+  ShowMessage('Starting High-Performance Search Benchmark for ' + ColorName + ' at Depth ' + IntToStr(depth) + '...');
+
+  StartTime := GetTickCount64;
+  res_score := MutiMinMax(board, SideIsRed, depth, aithinkstep);
+  aithinkstep := copy(aithinkstep,3,length(aithinkstep)-3);
+  EndTime := GetTickCount64;
+
+  Elapsed := (EndTime - StartTime) / 1000;
+  if Elapsed < 0.001 then Elapsed := 0.001;
+
+  ShowMessage('Benchmark Complete (' + ColorName + ' Search).' + #13#10 +
+              'Best Move: ' + aithinkstep + #13#10 +
+              'Real Board Score: ' + IntToStr(res_score) + #13#10 +
+              'Total GPU Evals: ' + IntToStr(FGpuEvalCount) + #13#10 +
+              'Time used: ' + FloatToStrF(Elapsed, ffFixed, 8, 2) + ' seconds' + #13#10 +
+              'GPU Speed: ' + FloatToStrF((FGpuEvalCount / Elapsed) / 1000000, ffFixed, 8, 2) + ' MNPS');
+end;
+
+procedure TForm1.CudaEnabledMenuItemClick(Sender: TObject);
+begin
+  ToggleCuda(TMenuItem(Sender).Checked, True);
+end;
+
+function TForm1.DetectCudaVersion(var Version: Integer): Boolean;
+var
+  res: CUresult;
+begin
+  Result := False;
+  Version := 0;
+  if not InitCuda then exit;
+
+  if Assigned(cuDriverGetVersion) then
+  begin
+    res := cuDriverGetVersion(Version);
+    if res = CUDA_SUCCESS then
+      Result := True;
+  end;
+end;
+
+procedure TForm1.ToggleCuda(Enabled: Boolean; ShowErrors: Boolean);
+var
+  dev: CUdevice;
+  PTXFile: TStringList;
+  const_ptr: CUdeviceptr;
+  const_size: NativeUInt;
+  res: CUresult;
+begin
+  if Enabled then
+  begin
+    if not InitCuda then
+    begin
+      if ShowErrors then ShowMessage('CUDA initialization failed. Make sure nvcuda.dll is in your system path.');
+      CudaEnabledMenuItem.Checked := False;
+      exit;
+    end;
+
+    if cuDeviceGet(dev, 0) <> CUDA_SUCCESS then
+    begin
+      if ShowErrors then ShowMessage('No CUDA device found.');
+      CudaEnabledMenuItem.Checked := False;
+      exit;
+    end;
+
+    if cuCtxCreate(FCudaContext, 0, dev) <> CUDA_SUCCESS then
+    begin
+      if ShowErrors then ShowMessage('Failed to create CUDA context.');
+      CudaEnabledMenuItem.Checked := False;
+      exit;
+    end;
+
+    // Increase stack size to 8KB for recursive alphabeta search
+    cuCtxSetLimit(CU_LIMIT_STACK_SIZE, 8192);
+
+    if FileExists('eval_kernel.ptx') then
+    begin
+      PTXFile := TStringList.Create;
+      try
+        PTXFile.LoadFromFile('eval_kernel.ptx');
+        if not LoadKernel(PTXFile.Text, 'evaluate_boards', FCudaModule, FCudaFunc) then
+        begin
+           if ShowErrors then ShowMessage('Failed to load CUDA kernel from eval_kernel.ptx');
+           CudaEnabledMenuItem.Checked := False;
+           cuCtxDestroy(FCudaContext);
+           FCudaContext := nil;
+           exit;
+        end;
+
+        if FCudaModule <> nil then
+           cuModuleGetFunction(FCudaSearchFunc, FCudaModule, 'alphabeta_search');
+      finally
+        PTXFile.Free;
+      end;
+    end
+    else
+    begin
+      if ShowErrors then ShowMessage('eval_kernel.ptx not found. Please compile eval_kernel.cu with nvcc.');
+      CudaEnabledMenuItem.Checked := False;
+      cuCtxDestroy(FCudaContext);
+      FCudaContext := nil;
+      exit;
+    end;
+
+    FCudaEnabled := True;
+    CudaEnabledMenuItem.Checked := True;
+
+    if FCudaEnabled then
+    begin
+       // Allocate persistent buffers for 100k boards
+       FGpuBufSize := 100000 * 100 * SizeOf(Integer);
+       res := cuMemAlloc(FGpuBoardsBuf, FGpuBufSize);
+       if res <> CUDA_SUCCESS then
+       begin
+         if ShowErrors then ShowMessage('CUDA: Failed to allocate FGpuBoardsBuf: ' + IntToStr(res));
+         FCudaEnabled := False;
+         CudaEnabledMenuItem.Checked := False;
+         exit;
+       end;
+
+       res := cuMemAlloc(FGpuResultsBuf, 100000 * SizeOf(Integer));
+       if res <> CUDA_SUCCESS then
+       begin
+         if ShowErrors then ShowMessage('CUDA: Failed to allocate FGpuResultsBuf: ' + IntToStr(res));
+         cuMemFree(FGpuBoardsBuf);
+         FGpuBoardsBuf := 0;
+         FCudaEnabled := False;
+         CudaEnabledMenuItem.Checked := False;
+         exit;
+       end;
+
+       res := cuMemAlloc(FGpuTransposedBuf, FGpuBufSize);
+       if res <> CUDA_SUCCESS then
+       begin
+         if ShowErrors then ShowMessage('CUDA: Failed to allocate FGpuTransposedBuf: ' + IntToStr(res));
+         cuMemFree(FGpuBoardsBuf);
+         cuMemFree(FGpuResultsBuf);
+         FGpuBoardsBuf := 0;
+         FGpuResultsBuf := 0;
+         FCudaEnabled := False;
+         CudaEnabledMenuItem.Checked := False;
+         exit;
+       end;
+
+       // Set constant memory weights
+       if cuModuleGetGlobal(const_ptr, const_size, FCudaModule, 'c_posmark') = CUDA_SUCCESS then
+          cuMemcpyHtoD(const_ptr, @PosMark[0,0], 100 * SizeOf(Integer));
+
+       // Disable CPU parallelization
+       ProcThreadPool.MaxThreadCount := 1;
+    end;
+  end
+  else
+  begin
+    if FGpuBoardsBuf <> 0 then cuMemFree(FGpuBoardsBuf);
+    if FGpuResultsBuf <> 0 then cuMemFree(FGpuResultsBuf);
+    if FGpuTransposedBuf <> 0 then cuMemFree(FGpuTransposedBuf);
+    FGpuBoardsBuf := 0;
+    FGpuResultsBuf := 0;
+    FGpuTransposedBuf := 0;
+
+    if FCudaContext <> nil then
+      cuCtxDestroy(FCudaContext);
+    FCudaContext := nil;
+    FCudaModule := nil;
+    FCudaFunc := nil;
+    FCudaSearchFunc := nil;
+    FCudaEnabled := False;
+    CudaEnabledMenuItem.Checked := False;
+
+    // Restore CPU parallelization
+    ProcThreadPool.MaxThreadCount := GetSystemThreadCount;
+  end;
+end;
+
+procedure TForm1.Timer1Timer(Sender: TObject);
+begin
+  if FCudaEnabled then
+  begin
+    if FGpuEvalCount < 0 then
+      GpuEvalLabel.Caption := 'GPU ERROR!'
+    else
+      GpuEvalLabel.Caption := 'GPU Evals: ' + IntToStr(FGpuEvalCount);
+  end
+  else
+    GpuEvalLabel.Caption := 'GPU Disabled';
+end;
 
 procedure TForm1.AboutButtonClick(Sender: TObject);
 begin
@@ -812,100 +1257,607 @@ var a,b,c,d,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;score
       aithinksteplist.free;
     end;
 
-function TForm1.MutiMinMax(Aboard:Tboard;const SideIsRed:Boolean;const depth:integer;var aithinkstep:string):integer;
-var a,b,c,d,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;oldaithinkstep,bestaithinkstep:string;
-//var a,b,c,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;sameboard:boolean;
+function TForm1.MutiMinMax(Aboard: Tboard; const SideIsRed: Boolean; const depth: integer; var aithinkstep: string): integer;
+type
+  TBranchInfo = record
+    a_idx, b_idx: Integer;
+    b_move: Integer;
+    start_idx, count: Integer;
+    moves_c: array of Integer;
+  end;
+var
+  a, b, c, d, bestvalue, value, b_pos, c_pos, i: integer;
+  node_val, branch_best, best_a_move, best_b_move, best_c_move, temp_best_c: integer;
+  oldaithinkstep, bestaithinkstep: string;
+  moves, child_moves, grandchild_moves: TMoveArray;
+  tempboard, tempboard2: Tboard;
+  batch_boards: array of Tboard;
+  batch_scores: array of Integer;
+  branch_info: array of TBranchInfo;
+  branch_count: Integer;
+  a_best, a_best_b, a_best_c: array of Integer;
 begin
-//一般來說，這裡有一個判斷棋局是否結束的函數，
-//一旦棋局結束就不必繼續搜索了，直接返回極值。
-//但由於黑白棋不存在中途結束的情況，故省略。
-
-//  bestaithinkstep:=aithinkstep;
-  a:=0;
-  b:=0;
-  Score(Aboard,a,b);
+  a := 0; b := 0;
+  Score(Aboard, a, b);
   if a = 0 then
   begin
-    if SideIsRed then
-      result:= 2000
-    else
-      result:= -2000;
+    if SideIsRed then Result := 2000 else Result := -2000;
     exit;
   end;
   if b = 0 then
   begin
-    if SideIsRed then
-      result:= -2000
-    else
-      result:= 2000;
+    if SideIsRed then Result := -2000 else Result := 2000;
     exit;
   end;
-  if (depth<=0) or (a+b>63) or StopThink then //葉子節點
+
+  // x250 Turbo Boost: Unified Subtree Batching at Depth 3+
+  if (depth >= 3) and FCudaEnabled and (not StopThink) then
   begin
-    result:= EvaluateScore(Aboard,SideIsRed);//直接返回對局面的估值
-    exit;
-  end;
-    templist := Tstringlist.Create;
-    bestvalue:=-INF;//初始最佳值設為負無窮
-  //生成走法
-//  templist:=tstringlist.Create;
-  if SideIsRed Then
-//    templist:=MakeRedMoveAI(Aboard)
-    MakeRedMove(Aboard,templist)
-  else
-//    templist:=MakeBlackMoveAI(Aboard);
-    MakeBlackMove(Aboard,templist);
-  if templist.Count = 0 then
-  begin
-    if SideIsRed Then
-      MakeBlackMove(Aboard,templist)
-    else
-      MakeRedMove(Aboard,templist);
-    if templist.Count = 0 then // both red and black no move
+    if SideIsRed then FastMakeRedMove(Aboard, moves)
+    else FastMakeBlackMove(Aboard, moves);
+
+    if moves.Count > 0 then
     begin
-      templist.Free;
-      result:= EvaluateScore(Aboard,SideIsRed);//直接返回對局面的估值
-      exit;
-    end;
-    aithinkstep := aithinkstep +'->PASS';
-    result := -MutiMinMax(Aboard,Not SideIsRed,depth,aithinkstep);//);//搜索子節點，注意前面的負號
-    templist.Free;
-    exit;
-  end;
-  tempboard:=Aboard;
-  oldaithinkstep :=aithinkstep;
-  For a:= 0 to templist.Count-1 do
-  begin
-//    Application.ProcessMessages;
-    aithinkstep := oldaithinkstep;
-      d:= strtoint(templist[a]);
-      b:= d div 8 +1 ;
-      c:= d mod 8;
-      if c = 0 then
-       begin
-      b:=b-1;
-      c:=8;
-       end;
-    aithinkstep := aithinkstep+'->'+intTostr(c)+','+intTostr(b);
-  // 走一步棋;//
-  //局面aboard 隨之改變
-    Aboard:=tempboard;
-    if SideIsRed Then
-     RedboardUpdate(Aboard,strToint(templist[a]))
-    else
-      BlackboardUpdate(aboard,strToint(templist[a]));
-    value:= -MutiMinMax(Aboard,Not SideIsRed,depth-1,aithinkstep);//);//搜索子節點，注意前面的負號
+      bestvalue := -INF;
+      oldaithinkstep := aithinkstep;
+      branch_count := 0;
+      SetLength(batch_boards, 0);
+      SetLength(branch_info, 0);
 
-
-      if value > bestvalue then
+      for a := 0 to moves.Count - 1 do
       begin
-        bestvalue:=value;
-        bestaithinkstep := aithinkstep;
+        tempboard := Aboard;
+        if SideIsRed then RedboardUpdate(tempboard, moves.Moves[a])
+        else BlackboardUpdate(tempboard, moves.Moves[a]);
+
+        if (not SideIsRed) then FastMakeRedMove(tempboard, child_moves)
+        else FastMakeBlackMove(tempboard, child_moves);
+
+        for b := 0 to child_moves.Count - 1 do
+        begin
+          tempboard2 := tempboard;
+          if (not SideIsRed) then RedboardUpdate(tempboard2, child_moves.Moves[b])
+          else BlackboardUpdate(tempboard2, child_moves.Moves[b]);
+
+          if SideIsRed then FastMakeRedMove(tempboard2, grandchild_moves)
+          else FastMakeBlackMove(tempboard2, grandchild_moves);
+
+          if grandchild_moves.Count > 0 then
+          begin
+            SetLength(branch_info, branch_count + 1);
+            branch_info[branch_count].a_idx := a;
+            branch_info[branch_count].b_idx := b;
+            branch_info[branch_count].b_move := child_moves.Moves[b];
+            branch_info[branch_count].start_idx := Length(batch_boards);
+            branch_info[branch_count].count := grandchild_moves.Count;
+            SetLength(branch_info[branch_count].moves_c, grandchild_moves.Count);
+            inc(branch_count);
+
+            SetLength(batch_boards, Length(batch_boards) + grandchild_moves.Count);
+            for c := 0 to grandchild_moves.Count - 1 do
+            begin
+              branch_info[branch_count-1].moves_c[c] := grandchild_moves.Moves[c];
+              batch_boards[branch_info[branch_count-1].start_idx + c] := tempboard2;
+              if SideIsRed then RedboardUpdate(batch_boards[branch_info[branch_count-1].start_idx + c], grandchild_moves.Moves[c])
+              else BlackboardUpdate(batch_boards[branch_info[branch_count-1].start_idx + c], grandchild_moves.Moves[c]);
+            end;
+          end;
+        end;
+      end;
+
+      if Length(batch_boards) > 0 then
+      begin
+        SetLength(batch_scores, Length(batch_boards));
+        if depth = 3 then
+          BatchEvaluateOnGPU(batch_boards, Not SideIsRed, batch_scores)
+        else
+        begin
+          c := -1; if SideIsRed then c := 1;
+          BatchSearchOnGPU(batch_boards, depth - 3, Not SideIsRed, -c, batch_scores);
+        end;
+
+        SetLength(a_best, moves.Count);
+        SetLength(a_best_b, moves.Count);
+        SetLength(a_best_c, moves.Count);
+        for a := 0 to moves.Count - 1 do
+        begin
+          a_best[a] := INF; // Minimizer (b) level
+          a_best_b[a] := -1;
+          a_best_c[a] := -1;
+        end;
+
+        for i := 0 to branch_count - 1 do
+        begin
+           node_val := -INF;
+           temp_best_c := -1;
+           for c := 0 to branch_info[i].count - 1 do
+           begin
+              // Level 3 is opponent's turn. We maximize Black's score at Level 2.
+              // batch_scores[idx] is from opponent's perspective (Red).
+              // So -batch_scores is Black's perspective.
+              if -batch_scores[branch_info[i].start_idx + c] > node_val then
+              begin
+                 node_val := -batch_scores[branch_info[i].start_idx + c];
+                 temp_best_c := branch_info[i].moves_c[c];
+              end;
+           end;
+
+           // Level 1 is Red's turn. Red minimizes Black's score.
+           if node_val < a_best[branch_info[i].a_idx] then
+           begin
+              a_best[branch_info[i].a_idx] := node_val;
+              a_best_b[branch_info[i].a_idx] := branch_info[i].b_move;
+              a_best_c[branch_info[i].a_idx] := temp_best_c;
+           end;
+        end;
+
+        bestvalue := -INF;
+        best_a_move := -1;
+        best_b_move := -1;
+        best_c_move := -1;
+
+        for a := 0 to moves.Count - 1 do
+        begin
+          if a_best[a] = INF then
+          begin
+             // Fallback: evaluate the board AFTER the move, not the root board
+             tempboard := Aboard;
+             if SideIsRed then RedboardUpdate(tempboard, moves.Moves[a])
+             else BlackboardUpdate(tempboard, moves.Moves[a]);
+             // EvaluateScore returns score for the root side (SideIsRed).
+             a_best[a] := EvaluateScore(tempboard, SideIsRed);
+          end;
+
+          // Root is Black. Black maximizes his score.
+          if a_best[a] > bestvalue then
+          begin
+            bestvalue := a_best[a];
+            best_a_move := moves.Moves[a];
+            best_b_move := a_best_b[a];
+            best_c_move := a_best_c[a];
+          end;
+        end;
+
+        if best_a_move >= 0 then
+        begin
+          bestaithinkstep := oldaithinkstep;
+          // Step 1
+          d := best_a_move;
+          b_pos := d div 8 + 1; c_pos := d mod 8;
+          if c_pos = 0 then begin b_pos := b_pos - 1; c_pos := 8; end;
+          bestaithinkstep := bestaithinkstep + '->' + intTostr(c_pos) + ',' + intTostr(b_pos);
+          tempboard := Aboard;
+          if SideIsRed then RedboardUpdate(tempboard, best_a_move)
+          else BlackboardUpdate(tempboard, best_a_move);
+
+          // Step 2
+          if best_b_move >= 0 then
+          begin
+            d := best_b_move;
+            b_pos := d div 8 + 1; c_pos := d mod 8;
+            if c_pos = 0 then begin b_pos := b_pos - 1; c_pos := 8; end;
+            bestaithinkstep := bestaithinkstep + '->' + intTostr(c_pos) + ',' + intTostr(b_pos);
+            if (not SideIsRed) then RedboardUpdate(tempboard, best_b_move)
+            else BlackboardUpdate(tempboard, best_b_move);
+
+            // Step 3
+            if best_c_move >= 0 then
+            begin
+              d := best_c_move;
+              b_pos := d div 8 + 1; c_pos := d mod 8;
+              if c_pos = 0 then begin b_pos := b_pos - 1; c_pos := 8; end;
+              bestaithinkstep := bestaithinkstep + '->' + intTostr(c_pos) + ',' + intTostr(b_pos);
+              if SideIsRed then RedboardUpdate(tempboard, best_c_move)
+              else BlackboardUpdate(tempboard, best_c_move);
+
+              // Step 4+ (Path Recovery)
+              if (depth > 3) and (not StopThink) then
+                MutiMinMax(tempboard, Not SideIsRed, depth - 3, bestaithinkstep);
+            end;
+          end;
+        end;
+
+        aithinkstep := bestaithinkstep;
+        Result := bestvalue;
+        exit;
       end;
     end;
-  templist.Free;
-  aithinkstep :=bestaithinkstep;
-  Result:= bestvalue;
+  end;
+
+  if (depth <= 0) or (a + b > 63) or StopThink then
+  begin
+    Result := EvaluateScore(Aboard, SideIsRed);
+    exit;
+  end;
+
+  bestvalue := -INF;
+  if SideIsRed then FastMakeRedMove(Aboard, moves)
+  else FastMakeBlackMove(Aboard, moves);
+
+  if moves.Count = 0 then
+  begin
+    if SideIsRed then FastMakeBlackMove(Aboard, moves)
+    else FastMakeRedMove(Aboard, moves);
+
+    if moves.Count = 0 then
+    begin
+      Result := EvaluateScore(Aboard, SideIsRed);
+      exit;
+    end;
+    oldaithinkstep := aithinkstep;
+    aithinkstep := aithinkstep + '->PASS';
+    Result := -MutiMinMax(Aboard, Not SideIsRed, depth, aithinkstep);
+    exit;
+  end;
+
+  tempboard := Aboard;
+  oldaithinkstep := aithinkstep;
+  for a := 0 to moves.Count - 1 do
+  begin
+    aithinkstep := oldaithinkstep;
+    d := moves.Moves[a];
+    b := d div 8 + 1;
+    c := d mod 8;
+    if c = 0 then begin b := b - 1; c := 8; end;
+    aithinkstep := aithinkstep + '->' + intTostr(c) + ',' + intTostr(b);
+
+    Aboard := tempboard;
+    if SideIsRed then RedboardUpdate(Aboard, moves.Moves[a])
+    else BlackboardUpdate(Aboard, moves.Moves[a]);
+
+    value := -MutiMinMax(Aboard, Not SideIsRed, depth - 1, aithinkstep);
+
+    if value > bestvalue then
+    begin
+      bestvalue := value;
+      bestaithinkstep := aithinkstep;
+    end;
+  end;
+  aithinkstep := bestaithinkstep;
+  Result := bestvalue;
+end;
+
+procedure TForm1.FastMakeRedMove(const aBoard:Tboard; var temp:TMoveArray);
+label lbl_next_red;
+var a,b,c,d:integer;
+begin
+  temp.Count := 0;
+  for b:=1 to 8 do
+    for c:=1 to 8 do
+    begin
+      if aBoard[b,c] <> 0 then continue;
+
+      // left to right
+      if (c < 7) and (aBoard[b][c+1] = -1) then
+      begin
+        for d:=2 to 7 do
+        begin
+          if c+d < 9 then
+          begin
+            if aBoard[b][c+d] = 1 then
+            begin
+              temp.Moves[temp.Count] := 8*c+b-8;
+              inc(temp.Count);
+              goto lbl_next_red;
+            end
+            else if aBoard[b][c+d] <> -1 then break;
+          end;
+        end;
+      end;
+
+      if c > 2 then // right to left
+      begin
+        if aBoard[b][c-1] = -1 then
+        begin
+          for d:=2 to 7 do
+          begin
+            if c-d > 0 then
+            begin
+              if aBoard[b][c-d] = 1 then
+              begin
+                temp.Moves[temp.Count] := 8*c+b-8;
+                inc(temp.Count);
+                goto lbl_next_red;
+              end
+              else if aBoard[b][c-d] <> -1 then break;
+            end;
+          end;
+        end;
+      end;
+
+      if b < 7 then // top to bottom
+      begin
+        if aBoard[b+1][c] = -1 then
+        begin
+          for d:= 2 to 7 do
+          begin
+            if b+d < 9 then
+            begin
+              if aBoard[b+d][c] = 1 then
+              begin
+                temp.Moves[temp.Count] := 8*c+b-8;
+                inc(temp.Count);
+                goto lbl_next_red;
+              end
+              else if aBoard[b+d][c] <> -1 then break;
+            end;
+          end;
+        end;
+      end;
+
+      if b > 2 then // bottom to top
+      begin
+        if aBoard[b-1][c] = -1 then
+        begin
+          for d := 2 to 7 do
+          begin
+            if b - d > 0 then
+            begin
+              if aBoard[b-d][c] = 1 then
+              begin
+                temp.Moves[temp.Count] := 8*c+b-8;
+                inc(temp.Count);
+                goto lbl_next_red;
+              end
+              else if aBoard[b-d][c] <> -1 then break;
+            end;
+          end;
+        end;
+      end;
+
+      if (b > 2) and (c > 2) then // top left
+      begin
+        if aBoard[b-1][c-1] = -1 then
+        begin
+          for d := 2 to 7 do
+          begin
+            if (b - d > 0) and (c - d > 0) then
+            begin
+              if aBoard[b-d][c-d] = 1 then
+              begin
+                temp.Moves[temp.Count] := 8*c+b-8;
+                inc(temp.Count);
+                goto lbl_next_red;
+              end
+              else if aBoard[b-d][c-d] <> -1 then break;
+            end;
+          end;
+        end;
+      end;
+
+      if (b < 7) and (c < 7) then // bottom right
+      begin
+        if aBoard[b+1][c+1] = -1 then
+        begin
+          for d := 2 to 7 do
+          begin
+            if (b + d < 9) and (c + d < 9) then
+            begin
+              if aBoard[b+d][c+d] = 1 then
+              begin
+                temp.Moves[temp.Count] := 8*c+b-8;
+                inc(temp.Count);
+                goto lbl_next_red;
+              end
+              else if aBoard[b+d][c+d] <> -1 then break;
+            end;
+          end;
+        end;
+      end;
+
+      if (b > 2) and (c < 7) then // top right
+      begin
+        if aBoard[b-1][c+1] = -1 then
+        begin
+          for d := 2 to 7 do
+          begin
+            if (b - d > 0) and (c + d < 9) then
+            begin
+              if aBoard[b-d][c+d] = 1 then
+              begin
+                temp.Moves[temp.Count] := 8*c+b-8;
+                inc(temp.Count);
+                goto lbl_next_red;
+              end
+              else if aBoard[b-d][c+d] <> -1 then break;
+            end;
+          end;
+        end;
+      end;
+
+      if (b < 7) and (c > 2) then // bottom left
+      begin
+        if aBoard[b+1][c-1] = -1 then
+        begin
+          for d := 2 to 7 do
+          begin
+            if (b + d < 9) and (c - d > 0) then
+            begin
+              if aBoard[b+d][c-d] = 1 then
+              begin
+                temp.Moves[temp.Count] := 8*c+b-8;
+                inc(temp.Count);
+                goto lbl_next_red;
+              end
+              else if aBoard[b+d][c-d] <> -1 then break;
+            end;
+          end;
+        end;
+      end;
+
+      lbl_next_red:;
+    end;
+end;
+
+procedure TForm1.FastMakeBlackMove(const aBoard:Tboard; var temp:TMoveArray);
+label lbl_next_black;
+var a,b,c,d:integer;
+begin
+  temp.Count := 0;
+  for b:=1 to 8 do
+    for c:=1 to 8 do
+    begin
+      if aBoard[b,c] <> 0 then continue;
+
+      if (c < 7) and (aBoard[b][c+1] = 1) then
+      begin
+        for d:=2 to 7 do
+        begin
+          if c+d < 9 then
+          begin
+            if aBoard[b][c+d] = -1 then
+            begin
+              temp.Moves[temp.Count] := 8*c+b-8;
+              inc(temp.Count);
+              goto lbl_next_black;
+            end
+            else if aBoard[b][c+d] <> 1 then break;
+          end;
+        end;
+      end;
+
+      if c > 2 then
+      begin
+        if aBoard[b][c-1] = 1 then
+        begin
+          for d:=2 to 7 do
+          begin
+            if c-d > 0 then
+            begin
+              if aBoard[b][c-d] = -1 then
+              begin
+                temp.Moves[temp.Count] := 8*c+b-8;
+                inc(temp.Count);
+                goto lbl_next_black;
+              end
+              else if aBoard[b][c-d] <> 1 then break;
+            end;
+          end;
+        end;
+      end;
+
+      if b < 7 then
+      begin
+        if aBoard[b+1][c] = 1 then
+        begin
+          for d:= 2 to 7 do
+          begin
+            if b+d < 9 then
+            begin
+              if aBoard[b+d][c] = -1 then
+              begin
+                temp.Moves[temp.Count] := 8*c+b-8;
+                inc(temp.Count);
+                goto lbl_next_black;
+              end
+              else if aBoard[b+d][c] <> 1 then break;
+            end;
+          end;
+        end;
+      end;
+
+      if b > 2 then
+      begin
+        if aBoard[b-1][c] = 1 then
+        begin
+          for d := 2 to 7 do
+          begin
+            if b - d > 0 then
+            begin
+              if aBoard[b-d][c] = -1 then
+              begin
+                temp.Moves[temp.Count] := 8*c+b-8;
+                inc(temp.Count);
+                goto lbl_next_black;
+              end
+              else if aBoard[b-d][c] <> 1 then break;
+            end;
+          end;
+        end;
+      end;
+
+      if (b > 2) and (c > 2) then
+      begin
+        if aBoard[b-1][c-1] = 1 then
+        begin
+          for d := 2 to 7 do
+          begin
+            if (b - d > 0) and (c - d > 0) then
+            begin
+              if aBoard[b-d][c-d] = -1 then
+              begin
+                temp.Moves[temp.Count] := 8*c+b-8;
+                inc(temp.Count);
+                goto lbl_next_black;
+              end
+              else if aBoard[b-d][c-d] <> 1 then break;
+            end;
+          end;
+        end;
+      end;
+
+      if (b < 7) and (c < 7) then
+      begin
+        if aBoard[b+1][c+1] = 1 then
+        begin
+          for d := 2 to 7 do
+          begin
+            if (b + d < 9) and (c + d < 9) then
+            begin
+              if aBoard[b+d][c+d] = -1 then
+              begin
+                temp.Moves[temp.Count] := 8*c+b-8;
+                inc(temp.Count);
+                goto lbl_next_black;
+              end
+              else if aBoard[b+d][c+d] <> 1 then break;
+            end;
+          end;
+        end;
+      end;
+
+      if (b > 2) and (c < 7) then
+      begin
+        if aBoard[b-1][c+1] = 1 then
+        begin
+          for d := 2 to 7 do
+          begin
+            if (b - d > 0) and (c + d < 9) then
+            begin
+              if aBoard[b-d][c+d] = -1 then
+              begin
+                temp.Moves[temp.Count] := 8*c+b-8;
+                inc(temp.Count);
+                goto lbl_next_black;
+              end
+              else if aBoard[b-d][c+d] <> 1 then break;
+            end;
+          end;
+        end;
+      end;
+
+      if (b < 7) and (c > 2) then
+      begin
+        if aBoard[b+1][c-1] = 1 then
+        begin
+          for d := 2 to 7 do
+          begin
+            if (b + d < 9) and (c - d > 0) then
+            begin
+              if aBoard[b+d][c-d] = -1 then
+              begin
+                temp.Moves[temp.Count] := 8*c+b-8;
+                inc(temp.Count);
+                goto lbl_next_black;
+              end
+              else if aBoard[b+d][c-d] <> 1 then break;
+            end;
+          end;
+        end;
+      end;
+
+      lbl_next_black:;
+    end;
 end;
 
 procedure TForm1.MakeRedMove(const aBoard:Tboard;var temp:TStringList);
@@ -1662,6 +2614,8 @@ end;
 
 procedure TForm1.FormDestroy(Sender: TObject);
 begin
+  if FCudaContext <> nil then
+    cuCtxDestroy(FCudaContext);
  // 唔用就釋放番
   Redlist.Free;
   Blacklist.Free;
@@ -3260,7 +4214,10 @@ begin
 end;
 
 function TForm1.MinMax(Aboard:Tboard;SideIsRed:Boolean;depth:integer;var aithinkstep:string):integer;
-var a,b,c,d,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;oldaithinkstep,bestaithinkstep:string;
+var a,b,c,d,bestvalue, value, b_pos, c_pos, node_val, branch_best, start_idx:integer;
+    moves, child_moves, grandchild_moves: TMoveArray;
+    templist,templist2, templist3:tstringlist;tempboard, tempboard2:Tboard;oldaithinkstep,bestaithinkstep:string;
+    child_boards, batch_boards: array of Tboard; gpu_scores, batch_scores: array of Integer;
 //var a,b,c,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;sameboard:boolean;
 begin
 //一般來說，這裡有一個判斷棋局是否結束的函數，
@@ -3285,6 +4242,82 @@ begin
       result:= 2000;
     exit;
   end;
+  // x25 Power Boost: High-Performance GPU Subtree Evaluation at Depth 6
+  if (depth=6) and FCudaEnabled and (not StopThink) then
+  begin
+    if SideIsRed then FastMakeRedMove(Aboard, moves)
+    else FastMakeBlackMove(Aboard, moves);
+
+    if moves.Count > 0 then
+    begin
+      bestvalue := -INF;
+      oldaithinkstep := aithinkstep;
+
+      for a := 0 to moves.Count - 1 do
+      begin
+        if StopThink then break;
+        tempboard := Aboard;
+        if SideIsRed then RedboardUpdate(tempboard, moves.Moves[a])
+        else BlackboardUpdate(tempboard, moves.Moves[a]);
+
+        if (not SideIsRed) then FastMakeRedMove(tempboard, child_moves)
+        else FastMakeBlackMove(tempboard, child_moves);
+
+        branch_best := INF; // Minimizer (side at depth 5)
+
+        for b := 0 to child_moves.Count - 1 do
+        begin
+          tempboard2 := tempboard;
+          if (not SideIsRed) then RedboardUpdate(tempboard2, child_moves.Moves[b])
+          else BlackboardUpdate(tempboard2, child_moves.Moves[b]);
+
+          if SideIsRed then FastMakeRedMove(tempboard2, grandchild_moves)
+          else FastMakeBlackMove(tempboard2, grandchild_moves);
+
+          if grandchild_moves.Count > 0 then
+          begin
+            SetLength(batch_boards, grandchild_moves.Count);
+            SetLength(batch_scores, grandchild_moves.Count);
+            for c := 0 to grandchild_moves.Count - 1 do
+            begin
+              batch_boards[c] := tempboard2;
+              if SideIsRed then RedboardUpdate(batch_boards[c], grandchild_moves.Moves[c])
+              else BlackboardUpdate(batch_boards[c], grandchild_moves.Moves[c]);
+            end;
+
+            // GPU evaluates all leaves of this grandchild node at once
+            BatchEvaluateOnGPU(batch_boards, SideIsRed, batch_scores);
+
+            node_val := -INF; // Maximizer (side at depth 4)
+            for c := 0 to High(batch_scores) do
+              if batch_scores[c] > node_val then node_val := batch_scores[c];
+
+            if node_val < branch_best then branch_best := node_val;
+          end
+          else begin
+            node_val := EvaluateScore(tempboard2, SideIsRed);
+            if node_val < branch_best then branch_best := node_val;
+          end;
+        end;
+
+        if child_moves.Count = 0 then branch_best := EvaluateScore(tempboard, SideIsRed);
+
+        if branch_best > bestvalue then
+        begin
+          bestvalue := branch_best;
+          d := moves.Moves[a];
+          b_pos := d div 8 + 1;
+          c_pos := d mod 8;
+          if c_pos = 0 then begin b_pos := b_pos - 1; c_pos := 8; end;
+          bestaithinkstep := oldaithinkstep + '->' + intTostr(c_pos) + ',' + intTostr(b_pos);
+        end;
+      end;
+      aithinkstep := bestaithinkstep;
+      Result := bestvalue;
+      exit;
+    end;
+  end;
+
   if (depth<=0) or (a+b>63) or StopThink then //葉子節點
   begin
     result:= EvaluateScore(Aboard,SideIsRed);//直接返回對局面的估值
@@ -3776,7 +4809,7 @@ begin
   a:=0;
   b:=0;
   Score(Aboard,a,b);
-  if a+b < 59 then begin
+  if a+b <= 59 then begin
     if aboard[1][1] = 0 then
       Result:= b-a+aboard[2][1]*posmark[2][1]+aboard[1][2]*posmark[1][2]
     else
@@ -3796,16 +4829,6 @@ begin
 
     if  not SideIsRed then
       Result:= -Result;
-
-//    if SideIsRed then
-//      Result:= EvaluateScoreA(Aboard,SideIsRed,redposmark)
-//    else
-     // Result:= EvaluateScoreA(Aboard,SideIsRed,realposmark);
-//   Result := a-b-(posmark[1][1]*Aboard[1][1]+posmark[2][1]*Aboard[2][1]+posmark[7][1]*Aboard[7][1]+posmark[8][1]*Aboard[8][1]+posmark[1][2]*Aboard[1][2]+posmark[8][2]*Aboard[8][2]+posmark[1][7]*Aboard[1][7]+posmark[8][7]*Aboard[8][7]+posmark[1][8]*Aboard[1][8]+posmark[7][8]*Aboard[7][8]+posmark[8][8]*Aboard[8][8]);
- //   Result := a-b;
-    // testng
-//   if SideIsRed then
-//     Result:= -Result;
   end
  else begin
     if SideIsRed then
