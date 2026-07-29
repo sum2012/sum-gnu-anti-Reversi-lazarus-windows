@@ -528,6 +528,8 @@ begin
      aibestmove := '';
      AiListBox.clear;
      ThinkstepEdit.Text:= '';
+     FGpuEvalCount := 0;
+     Application.ProcessMessages;
      tempdepth:= strToint(Endgamedepth.text);
      score(board,a,b);
      if a+b + tempdepth > 64 then
