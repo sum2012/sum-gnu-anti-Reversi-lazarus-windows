@@ -772,7 +772,7 @@ begin
 
   StartTime := GetTickCount64;
   res_score := MutiMinMax(board, SideIsRed, depth, aithinkstep);
-  aithinkstep := copy(aithinkstep,3,length(aithinkstep)-3);
+  aithinkstep := copy(aithinkstep,3,length(aithinkstep)-2);
   EndTime := GetTickCount64;
 
   Elapsed := (EndTime - StartTime) / 1000;
