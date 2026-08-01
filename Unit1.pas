@@ -24,7 +24,7 @@ interface
 
 uses
   Windows, SysUtils, Variants, Classes, Graphics, Controls, Forms,
-  Dialogs, ExtCtrls, StdCtrls, Menus,ComCtrls,MTProcs,lclintf,MTPCPU,ClipBrd, cuda_utils;
+  Dialogs, ExtCtrls, StdCtrls, Menus,ComCtrls,lclintf,ClipBrd, cuda_utils;
 
 const
   inf = 10000;
@@ -243,7 +243,7 @@ type
       procedure FastMakeRedMove(const ABoard:Tboard; var temp:TMoveArray);
       procedure FastMakeBlackMove(const ABoard:Tboard; var temp:TMoveArray);
       function Muti(const ComputerisRed:Boolean):string;
-      procedure DoSomethingParallel(Index: PtrInt; Data: Pointer; Item: TMultiThreadProcItem);
+      procedure DoSomethingParallel(Index: PtrInt);
       procedure MakeRedMove(const ABoard:Tboard;var temp:TStringList);
       procedure MakeBlackMove(const ABoard:Tboard;var temp:TStringList);
  //     function MakeRedMoveAI(const ABoard:Tboard):TStringList;
@@ -346,6 +346,112 @@ var
 implementation
 
 {$R *.lfm}
+
+type
+  TParallelProcedure = procedure(Index: PtrInt) of object;
+
+  TParallelWorker = class(TThread)
+  private
+    FCurrentIndex: PPtrInt;
+    FMaxIndex: PtrInt;
+    FProc: TParallelProcedure;
+    FSection: PRTLCriticalSection;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(CurrentIndex: PPtrInt; MaxIndex: PtrInt; Proc: TParallelProcedure; Section: PRTLCriticalSection);
+  end;
+
+  TParallel = class
+  private
+    class var FMaxThreadCount: Integer;
+    class function GetMaxThreadCount: Integer; static;
+  public
+    class property MaxThreadCount: Integer read GetMaxThreadCount write FMaxThreadCount;
+    class procedure DoParallel(AProc: TParallelProcedure; StartIndex, EndIndex: PtrInt);
+  end;
+
+{ TParallelWorker }
+
+constructor TParallelWorker.Create(CurrentIndex: PPtrInt; MaxIndex: PtrInt; Proc: TParallelProcedure; Section: PRTLCriticalSection);
+begin
+  inherited Create(False);
+  FCurrentIndex := CurrentIndex;
+  FMaxIndex := MaxIndex;
+  FProc := Proc;
+  FSection := Section;
+  FreeOnTerminate := False;
+end;
+
+procedure TParallelWorker.Execute;
+var
+  Index: PtrInt;
+begin
+  while not Terminated do
+  begin
+    EnterCriticalSection(FSection^);
+    try
+      Index := FCurrentIndex^;
+      if Index > FMaxIndex then
+        Exit;
+      Inc(FCurrentIndex^);
+    finally
+      LeaveCriticalSection(FSection^);
+    end;
+    FProc(Index);
+  end;
+end;
+
+{ TParallel }
+
+class function TParallel.GetMaxThreadCount: Integer;
+var
+  SI: SYSTEM_INFO;
+begin
+  if FMaxThreadCount = 0 then
+  begin
+    GetSystemInfo(SI);
+    FMaxThreadCount := SI.dwNumberOfProcessors;
+  end;
+  Result := FMaxThreadCount;
+end;
+
+class procedure TParallel.DoParallel(AProc: TParallelProcedure; StartIndex, EndIndex: PtrInt);
+var
+  Workers: array of TParallelWorker;
+  ThreadCount, i: Integer;
+  CurrentIndex: PtrInt;
+  Section: TRTLCriticalSection;
+begin
+  if EndIndex < StartIndex then Exit;
+
+  ThreadCount := MaxThreadCount;
+  if ThreadCount > (EndIndex - StartIndex + 1) then
+    ThreadCount := EndIndex - StartIndex + 1;
+
+  if ThreadCount <= 1 then
+  begin
+    for i := StartIndex to EndIndex do
+      AProc(i);
+    Exit;
+  end;
+
+  InitCriticalSection(Section);
+  try
+    CurrentIndex := StartIndex;
+    SetLength(Workers, ThreadCount);
+    for i := 0 to ThreadCount - 1 do
+      Workers[i] := TParallelWorker.Create(@CurrentIndex, EndIndex, AProc, @Section);
+
+    for i := 0 to ThreadCount - 1 do
+    begin
+      Workers[i].WaitFor;
+      Workers[i].Free;
+    end;
+  finally
+    DoneCriticalSection(Section);
+  end;
+end;
 
 
 
@@ -470,14 +576,23 @@ begin
 end;
 mutidepth:= depth;
 
+
 if FCudaEnabled then
 begin
+  // seem not go here
+//  depth := StrToIntDef(NornalDepth.Text, 7);
+  FGpuEvalCount := 0;
+  move := '';
+  bestscore := MutiMinMax(board, ComputerisRed, depth, move);
+  move := copy(move,3,length(move)-2);
+  AIDisplayScoreLabel.Caption:= inttostr(bestscore);
+  ThinkstepEdit.Text:= move;
   // Sequential loop for CUDA to avoid multi-thread overhead and noise
-  for a := 0 to mutitemplist.count - 1 do
-    DoSomethingParallel(a, nil, nil);
+  //for a := 0 to mutitemplist.count - 1 do
+    //DoSomethingParallel(a);
 end
 else begin
-  ProcThreadPool.DoParallel(DoSomethingParallel,0,mutitemplist.count-1,nil);// address, startindex, endindex, optional data,max thread
+  TParallel.DoParallel(DoSomethingParallel,0,mutitemplist.count-1);
 end;
 
 for a:= 0 to mutiscorelist.count-1 do
@@ -915,7 +1030,7 @@ begin
           cuMemcpyHtoD(const_ptr, @PosMark[0,0], 100 * SizeOf(Integer));
 
        // Disable CPU parallelization
-       ProcThreadPool.MaxThreadCount := 1;
+       TParallel.MaxThreadCount := 1;
     end;
   end
   else
@@ -937,7 +1052,7 @@ begin
     CudaEnabledMenuItem.Checked := False;
 
     // Restore CPU parallelization
-    ProcThreadPool.MaxThreadCount := GetSystemThreadCount;
+    TParallel.MaxThreadCount := 0; // Reset to auto
   end;
 end;
 
@@ -977,7 +1092,7 @@ begin
   system.DoneCriticalSection(MyCriticalSection);
 end;
 
-procedure TForm1.DoSomethingParallel(Index: PtrInt; Data: Pointer; Item: TMultiThreadProcItem);
+procedure TForm1.DoSomethingParallel(Index: PtrInt);
 var Aboard:Tboard;a,B,C,D,mutitscore:integer;stepno,tempstring,tempstring2,tempstring3,aithinkstep:string;SideisRed:Boolean;
 begin
 // system.EnterCriticalsection(MyCriticalSection);
@@ -4400,7 +4515,7 @@ begin
   thinkstep:='';
   Application.ProcessMessages;
   Score(board,a,b);
-  if (a+b < 64) and (GetSystemThreadCount > 1) then
+  if (a+b < 64) and (TParallel.MaxThreadCount > 1) then
   begin
     Result:=muti(ComputerIsRed);
     exit;
@@ -4437,7 +4552,50 @@ begin
   end;
 
      if (a + b < 46) and  (c > 4) and (Realdepth > 5) then
-   a:=minMaxStart(Aboard,ComputerIsRed,Realdepth,thinkstep)
+     begin
+       if FCudaEnabled then
+       begin
+           FGpuEvalCount := 0;
+           aimovelist := '';
+           a:= MutiMinMax(Aboard, ComputerIsRed, Realdepth, aimovelist);
+           aimovelist := copy(aimovelist,3,length(aimovelist)-2);
+           AIDisplayScoreLabel.caption:=intTostr(a);
+           redlist.Clear;
+           blacklist.Clear;
+           b:= strtoint(copy(aimovelist,3,1));
+           a:= strtoint(copy(aimovelist,1,1));
+           Result:='image'+ inttostr((b-1)*8+a);
+           aimovelist := AIDisplayScoreLabel.caption + ':'+ aimovelist;
+           AiListBox.Items.Add(aimovelist);
+           ThinkstepEdit.text:=aimovelist;
+           StopThinkButton.Enabled:=False;
+           StopThink:=False;
+           exit;
+       end
+       else begin
+         if (a + b < 58) and FCudaEnabled then
+         begin
+               FGpuEvalCount := 0;
+               aimovelist := '';
+               a:= MutiMinMax(Aboard, ComputerIsRed, Realdepth, aimovelist);
+               aimovelist := copy(aimovelist,3,length(aimovelist)-2);
+               AIDisplayScoreLabel.caption:=intTostr(a);
+               redlist.Clear;
+               blacklist.Clear;
+               b:= strtoint(copy(aimovelist,3,1));
+               a:= strtoint(copy(aimovelist,1,1));
+               Result:='image'+ inttostr((b-1)*8+a);
+               aimovelist := AIDisplayScoreLabel.caption + ':'+ aimovelist;
+               AiListBox.Items.Add(aimovelist);
+               ThinkstepEdit.text:=aimovelist;
+               StopThinkButton.Enabled:=False;
+               StopThink:=False;
+               exit;
+         end
+         else
+           a:=minMaxStart(Aboard,ComputerIsRed,Realdepth,thinkstep)
+       end;
+     end
  else
 
     a:=minMaxRandom(Aboard,ComputerIsRed,Realdepth,thinkstep);
