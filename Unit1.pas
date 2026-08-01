@@ -682,7 +682,7 @@ begin
   else
     tempdepth:= strToint(Nornaldepth.Text);
 
-  if (c > 4) and (a + b < 46)  then
+  if (c >= 4) and (a + b < 46)  then
   begin
   //nornally  tempdepth:= strtoint(NornalDepth.text)-2;
     tempdepth:= tempdepth-4;
@@ -4329,7 +4329,7 @@ begin
 end;
 
 function TForm1.MinMax(Aboard:Tboard;SideIsRed:Boolean;depth:integer;var aithinkstep:string):integer;
-var a,b,c,d,bestvalue, value, b_pos, c_pos, node_val, branch_best, start_idx:integer;
+var a,b,c,d,bestvalue, value, b_pos, c_pos, node_val, branch_best, start_idx, best_a_move:integer;
     moves, child_moves, grandchild_moves: TMoveArray;
     templist,templist2, templist3:tstringlist;tempboard, tempboard2:Tboard;oldaithinkstep,bestaithinkstep:string;
     child_boards, batch_boards: array of Tboard; gpu_scores, batch_scores: array of Integer;
@@ -4366,6 +4366,7 @@ begin
     if moves.Count > 0 then
     begin
       bestvalue := -INF;
+      best_a_move := -1;
       oldaithinkstep := aithinkstep;
 
       for a := 0 to moves.Count - 1 do
@@ -4420,6 +4421,7 @@ begin
         if branch_best > bestvalue then
         begin
           bestvalue := branch_best;
+          best_a_move := moves.Moves[a];
           d := moves.Moves[a];
           b_pos := d div 8 + 1;
           c_pos := d mod 8;
@@ -4427,6 +4429,15 @@ begin
           bestaithinkstep := oldaithinkstep + '->' + intTostr(c_pos) + ',' + intTostr(b_pos);
         end;
       end;
+
+      if (best_a_move >= 0) and (depth > 1) and (not StopThink) then
+      begin
+        tempboard := Aboard;
+        if SideIsRed then RedboardUpdate(tempboard, best_a_move)
+        else BlackboardUpdate(tempboard, best_a_move);
+        MinMax(tempboard, Not SideIsRed, depth - 1, bestaithinkstep);
+      end;
+
       aithinkstep := bestaithinkstep;
       Result := bestvalue;
       exit;
@@ -4551,7 +4562,7 @@ begin
     c:= blacklist.Count;
   end;
 
-     if (a + b < 46) and  (c > 4) and (Realdepth > 5) then
+     if (a + b < 46) and  (c >= 4) and (Realdepth > 5) then
      begin
        if FCudaEnabled then
        begin
