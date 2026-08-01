@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<CONFIG>
-  <Compiler Value="d:\lazarus\bin\fpc\3.2.2\bin\x86_64-win64\fpc.exe" Date="1556502373"/>
-  <Params Value="-MDelphi -Scghi -Ciro -O3 -OoREGVAR -gw3 -gl -WG -l -vewnhibq -Fud:\project\sum-gnu-anti-Reversi-lazarus-windows\ -Fud:\lazarus\bin\lcl\units\x86_64-win64\win32 -Fud:\lazarus\bin\lcl\units\x86_64-win64 -Fud:\lazarus\bin\components\freetype\lib\x86_64-win64 -Fud:\lazarus\bin\components\lazutils\lib\x86_64-win64 -Fud:\lazarus\bin\packager\units\x86_64-win64 -od:\project\sum-gnu-anti-Reversi-lazarus-windows\SumAntiReversi8x8.exe -dLCL -dLCLwin32 SumAntiReversi8x8.lpr"/>
-</CONFIG>

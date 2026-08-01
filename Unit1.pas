@@ -576,11 +576,20 @@ begin
 end;
 mutidepth:= depth;
 
+
 if FCudaEnabled then
 begin
+  // seem not go here
+//  depth := StrToIntDef(NornalDepth.Text, 7);
+  FGpuEvalCount := 0;
+  move := '';
+  bestscore := MutiMinMax(board, ComputerisRed, depth, move);
+  move := copy(move,3,length(move)-2);
+  AIDisplayScoreLabel.Caption:= inttostr(bestscore);
+  ThinkstepEdit.Text:= move;
   // Sequential loop for CUDA to avoid multi-thread overhead and noise
-  for a := 0 to mutitemplist.count - 1 do
-    DoSomethingParallel(a, nil, nil);
+  //for a := 0 to mutitemplist.count - 1 do
+    //DoSomethingParallel(a);
 end
 else begin
   TParallel.DoParallel(DoSomethingParallel,0,mutitemplist.count-1);
@@ -4543,7 +4552,50 @@ begin
   end;
 
      if (a + b < 46) and  (c > 4) and (Realdepth > 5) then
-   a:=minMaxStart(Aboard,ComputerIsRed,Realdepth,thinkstep)
+     begin
+       if FCudaEnabled then
+       begin
+           FGpuEvalCount := 0;
+           aimovelist := '';
+           a:= MutiMinMax(Aboard, ComputerIsRed, Realdepth, aimovelist);
+           aimovelist := copy(aimovelist,3,length(aimovelist)-2);
+           AIDisplayScoreLabel.caption:=intTostr(a);
+           redlist.Clear;
+           blacklist.Clear;
+           b:= strtoint(copy(aimovelist,3,1));
+           a:= strtoint(copy(aimovelist,1,1));
+           Result:='image'+ inttostr((b-1)*8+a);
+           aimovelist := AIDisplayScoreLabel.caption + ':'+ aimovelist;
+           AiListBox.Items.Add(aimovelist);
+           ThinkstepEdit.text:=aimovelist;
+           StopThinkButton.Enabled:=False;
+           StopThink:=False;
+           exit;
+       end
+       else begin
+         if (a + b < 58) and FCudaEnabled then
+         begin
+               FGpuEvalCount := 0;
+               aimovelist := '';
+               a:= MutiMinMax(Aboard, ComputerIsRed, Realdepth, aimovelist);
+               aimovelist := copy(aimovelist,3,length(aimovelist)-2);
+               AIDisplayScoreLabel.caption:=intTostr(a);
+               redlist.Clear;
+               blacklist.Clear;
+               b:= strtoint(copy(aimovelist,3,1));
+               a:= strtoint(copy(aimovelist,1,1));
+               Result:='image'+ inttostr((b-1)*8+a);
+               aimovelist := AIDisplayScoreLabel.caption + ':'+ aimovelist;
+               AiListBox.Items.Add(aimovelist);
+               ThinkstepEdit.text:=aimovelist;
+               StopThinkButton.Enabled:=False;
+               StopThink:=False;
+               exit;
+         end
+         else
+           a:=minMaxStart(Aboard,ComputerIsRed,Realdepth,thinkstep)
+       end;
+     end
  else
 
     a:=minMaxRandom(Aboard,ComputerIsRed,Realdepth,thinkstep);
