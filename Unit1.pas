@@ -159,6 +159,7 @@ type
     CudaStressTest: TMenuItem;
     Redlabel: TLabel;
     BlackLabel: TLabel;
+    AIUsedTimeLabel: TLabel;
     ProgressBar1: TProgressBar;
     Startposition2Button: TMenuItem;
     Startposition3Button: TMenuItem;
@@ -4520,8 +4521,9 @@ begin
 end;
 
 function TForm1.AI(Aboard:Tboard;ComputerIsRed:Boolean):string;
-var a,b,c:integer;thinkstep:string;
+var a,b,c:integer;thinkstep:string; t1: QWord;
 begin
+  t1 := GetTickCount64;
   AiListBox.Clear;
   thinkstep:='';
   Application.ProcessMessages;
@@ -4529,6 +4531,7 @@ begin
   if (a+b < 64) and (TParallel.MaxThreadCount > 1) then
   begin
     Result:=muti(ComputerIsRed);
+    AIUsedTimeLabel.Caption := 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's';
     exit;
   end;
   StopThinkButton.Enabled:=True;
@@ -4581,6 +4584,7 @@ begin
            ThinkstepEdit.text:=aimovelist;
            StopThinkButton.Enabled:=False;
            StopThink:=False;
+           AIUsedTimeLabel.Caption := 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's';
            exit;
        end
        else begin
@@ -4601,6 +4605,7 @@ begin
                ThinkstepEdit.text:=aimovelist;
                StopThinkButton.Enabled:=False;
                StopThink:=False;
+               AIUsedTimeLabel.Caption := 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's';
                exit;
          end
          else
@@ -4624,6 +4629,7 @@ begin
   Result:='image'+ inttostr(a) ;
   StopThinkButton.Enabled:=False;
   StopThink:=False;
+  AIUsedTimeLabel.Caption := 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's';
 end;
 
 Procedure Tform1.Scoresort(var scorelist:Tstringlist;var stepno:Tstringlist);

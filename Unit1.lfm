@@ -12950,6 +12950,14 @@ object Form1: TForm1
     Caption = '0'
     ParentColor = False
   end
+  object AIUsedTimeLabel: TLabel
+    Left = 200
+    Height = 20
+    Top = 552
+    Width = 70
+    Caption = 'Time: 0s'
+    ParentColor = False
+  end
   object GpuEvalLabel: TLabel
     Left = 48
     Height = 20
