@@ -174,6 +174,7 @@ type
     procedure CudaEnabledMenuItemClick(Sender: TObject);
     procedure CudaStressTestClick(Sender: TObject);
     procedure AboutButtonClick(Sender: TObject);
+    procedure NornalDepthChange(Sender: TObject);
     procedure Timer1Timer(Sender: TObject);
     procedure ComputerFirstButtonClick(Sender: TObject);
     procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
@@ -255,15 +256,15 @@ type
       procedure BlackBoardUpdate(var Aboard:Tboard;LastChess:Integer);
       procedure Updateboard;
       function AI(Aboard:Tboard;ComputerIsRed:Boolean):string;
-      function MinMax(Aboard:Tboard;SideIsRed:Boolean;depth:integer;var aithinkstep:string):integer;
-      function MinMaxRandom(Aboard:Tboard;SideIsRed:Boolean;depth:integer;var aithinkstep:string):integer;
+      function MinMax(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:string):integer;
+      function MinMaxRandom(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:string):integer;
       function EvaluateScore(const Aboard:Tboard;const SideIsRed:Boolean):Integer;
-      function MinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;var aithinkstep:string):integer;
-      function MutiMinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;var aithinkstep:string):integer;
+      function MinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:string):integer;
+      function MutiMinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:string):integer;
       Procedure Scoresort(var scorelist:Tstringlist;var stepno:Tstringlist);
       function ThinkNumber(Aboard:Tboard;SideIsRed:Boolean;depth:integer):integer;
       function BoardtoFen:String;
-      function MutiMinMax(Aboard:Tboard;const SideIsRed:Boolean;const depth:integer;var aithinkstep:string):integer;
+      function MutiMinMax(Aboard:Tboard;const SideIsRed:Boolean;const depth:integer;alpha, beta: integer;var aithinkstep:string):integer;
       procedure BatchEvaluateOnGPU(const Boards: array of Tboard; const SideIsRed: Boolean; var Scores: array of Integer);
       procedure BatchSearchOnGPU(const Boards: array of Tboard; const Depth: Integer; const SideIsRed: Boolean; const Color: Integer; var Scores: array of Integer);
       function DetectCudaVersion(var Version: Integer): Boolean;
@@ -584,7 +585,7 @@ begin
 //  depth := StrToIntDef(NornalDepth.Text, 7);
   FGpuEvalCount := 0;
   move := '';
-  bestscore := MutiMinMax(board, ComputerisRed, depth, move);
+  bestscore := MutiMinMax(board, ComputerisRed, depth, -INF, INF, move);
   move := copy(move,3,length(move)-2);
   AIDisplayScoreLabel.Caption:= inttostr(bestscore);
   ThinkstepEdit.Text:= move;
@@ -653,7 +654,7 @@ begin
      else
        tempdepth:= strToint(Nornaldepth.Text);
 
-     a:=MutiMinMax(board, ComputerisRed, tempdepth, aibestmove);
+     a:=MutiMinMax(board, ComputerisRed, tempdepth, -INF, INF, aibestmove);
      AIDisplayScoreLabel.Caption:= inttostr(a);
      aibestmove := copy(aibestmove,3,length(aibestmove)-2);
      AiListBox.items.add(inttostr(a)+':'+aibestmove);
@@ -887,7 +888,7 @@ begin
   ShowMessage('Starting High-Performance Search Benchmark for ' + ColorName + ' at Depth ' + IntToStr(depth) + '...');
 
   StartTime := GetTickCount64;
-  res_score := MutiMinMax(board, SideIsRed, depth, aithinkstep);
+  res_score := MutiMinMax(board, SideIsRed, depth, -INF, INF, aithinkstep);
   aithinkstep := copy(aithinkstep,3,length(aithinkstep)-2);
   EndTime := GetTickCount64;
 
@@ -1079,6 +1080,11 @@ begin
 'any later version.');
 end;
 
+procedure TForm1.NornalDepthChange(Sender: TObject);
+begin
+
+end;
+
 procedure TForm1.ComputerFirstButtonClick(Sender: TObject);
 begin
   HumanVsHumanButton.Click;
@@ -1138,9 +1144,9 @@ begin
       RedboardUpdate(Aboard,strtoint(tempstring));
     end;
     if  mutidepth > 5 then
-      mutitscore := -MutiMinMaxStart(Aboard,mutiSideIsRed,mutidepth,aithinkstep)
+      mutitscore := -MutiMinMaxStart(Aboard,mutiSideIsRed,mutidepth, -INF, INF, aithinkstep)
     else
-      mutitscore := -MutiMinMax(Aboard,mutiSideIsRed,mutidepth,aithinkstep);
+      mutitscore := -MutiMinMax(Aboard,mutiSideIsRed,mutidepth, -INF, INF, aithinkstep);
   end
   else begin
      aithinkstep := aithinkstep + '->PASS';
@@ -1148,7 +1154,7 @@ begin
        RedboardUpdate(Aboard,strtoint(tempstring2))
      Else
        Blackboardupdate(Aboard,strtoint(tempstring2));
-     mutitscore := -MutiMinMax(Aboard,mutiSideIsRed,mutidepth+1,aithinkstep);
+     mutitscore := -MutiMinMax(Aboard,mutiSideIsRed,mutidepth+1, -INF, INF, aithinkstep);
   end;
   a := strtoint(stepno);
   system.EnterCriticalsection(MyCriticalSection);
@@ -1185,7 +1191,7 @@ begin
       BlackboardUpdate(Aboard,strToint(Templist[a]))
     else
       RedboardUpdate(Aboard,strToint(Templist[a]));
-    mutitscore := -MutiMinMax(Aboard,mutiSideIsRed,mutidepth-2,aithinkstep);
+    mutitscore := -MutiMinMax(Aboard,mutiSideIsRed,mutidepth-2, -INF, INF, aithinkstep);
     if mutitscore > bestscore then
     begin
       bestscore := mutitscore;
@@ -1201,7 +1207,7 @@ begin
 }
 end;
 
-function TForm1.MutiMinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;var aithinkstep:string):integer;
+function TForm1.MutiMinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:string):integer;
 var a,b,c,d,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;scorelist,steplist:Tstringlist;aithinksteplist:Tstringlist;oldaithinkstep:string;//bestaithinkstep:string;
     //var a,b,c,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;sameboard:boolean;
     begin
@@ -1263,7 +1269,7 @@ var a,b,c,d,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;score
     //      exit;
     //    end
     //    else begin
-          result := -mutiMinMaxStart(Aboard,Not SideIsRed,depth,aithinkstep);//);//搜索子節點，注意前面的負號
+          result := -mutiMinMaxStart(Aboard,Not SideIsRed,depth, -beta, -alpha, aithinkstep);//);//搜索子節點，注意前面的負號
      //     result := -MinMaxSecond(Aboard,Not SideIsRed,depth);//);//搜索子節點，注意前面的負號
     //      if a+ b < 40 then
     //        result := result + 100;
@@ -1287,7 +1293,7 @@ var a,b,c,d,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;score
          RedboardUpdate(Aboard,strToint(templist[a]))
         else
           BlackboardUpdate(aboard,strToint(templist[a]));
-        value:= -mutiMinMax(Aboard,Not SideIsRed,depth -2,aithinkstep);//);//搜索子節點，注意前面的負號
+        value:= -mutiMinMax(Aboard,Not SideIsRed,depth -2, -INF, INF, aithinkstep);//);//搜索子節點，注意前面的負號
         scorelist.add(inttostr(value));
 
        end;
@@ -1316,7 +1322,7 @@ var a,b,c,d,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;score
         else
           BlackboardUpdate(aboard,strToint(steplist[a]));
 
-        value:= -mutiMinMax(Aboard,Not SideIsRed,depth-1,aithinkstep);//);//搜索子節點，注意前面的負號
+        value:= -mutiMinMax(Aboard,Not SideIsRed,depth-1, -beta, -alpha, aithinkstep);//);//搜索子節點，注意前面的負號
 
     //    Aboard:=Tempboard;//撤銷剛才的一步;//恢復局面
 
@@ -1346,6 +1352,11 @@ var a,b,c,d,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;score
     //      if value > bestvalue then
     //      begin
             bestvalue:=value;
+            if value > alpha then alpha := value;
+//            if alpha >= beta then break; // This is a bit tricky here because of the randomized best move logic, but standard Alpha-Beta would break here.
+// However, the current code logic seems to search all div 2 moves.
+// Let's add the break for now to see if it improves performance significantly.
+            if alpha >= beta then break;
     //        if depth = Realdepth then
     //        aimovelist.Add(templist[a]+' '+intTostr(value));
            end;
@@ -1373,7 +1384,7 @@ var a,b,c,d,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;score
       aithinksteplist.free;
     end;
 
-function TForm1.MutiMinMax(Aboard: Tboard; const SideIsRed: Boolean; const depth: integer; var aithinkstep: string): integer;
+function TForm1.MutiMinMax(Aboard: Tboard; const SideIsRed: Boolean; const depth: integer; alpha, beta: integer; var aithinkstep: string): integer;
 type
   TBranchInfo = record
     a_idx, b_idx: Integer;
@@ -1383,9 +1394,11 @@ type
   end;
 var
   a, b, c, d, bestvalue, value, b_pos, c_pos, i: integer;
+  scorelist, steplist: TStringList;
+  moves: TMoveArray;
   node_val, branch_best, best_a_move, best_b_move, best_c_move, temp_best_c: integer;
   oldaithinkstep, bestaithinkstep: string;
-  moves, child_moves, grandchild_moves: TMoveArray;
+  child_moves, grandchild_moves: TMoveArray;
   tempboard, tempboard2: Tboard;
   batch_boards: array of Tboard;
   batch_scores: array of Integer;
@@ -1568,7 +1581,7 @@ begin
 
               // Step 4+ (Path Recovery)
               if (depth > 3) and (not StopThink) then
-                MutiMinMax(tempboard, Not SideIsRed, depth - 3, bestaithinkstep);
+                MutiMinMax(tempboard, Not SideIsRed, depth - 3, -INF, INF, bestaithinkstep);
             end;
           end;
         end;
@@ -1602,12 +1615,34 @@ begin
     end;
     oldaithinkstep := aithinkstep;
     aithinkstep := aithinkstep + '->PASS';
-    Result := -MutiMinMax(Aboard, Not SideIsRed, depth, aithinkstep);
+    Result := -MutiMinMax(Aboard, Not SideIsRed, depth, -beta, -alpha, aithinkstep);
     exit;
   end;
 
   tempboard := Aboard;
   oldaithinkstep := aithinkstep;
+
+  if moves.Count > 1 then
+  begin
+    // Simple move ordering for MutiMinMax
+    scorelist := TStringList.Create;
+    steplist := TStringList.Create;
+    for a := 0 to moves.Count - 1 do
+    begin
+      tempboard2 := Aboard;
+      if SideIsRed then RedboardUpdate(tempboard2, moves.Moves[a])
+      else BlackboardUpdate(tempboard2, moves.Moves[a]);
+      value := -EvaluateScore(tempboard2, not SideIsRed);
+      scorelist.Add(IntToStr(value));
+      steplist.Add(IntToStr(moves.Moves[a]));
+    end;
+    Scoresort(scorelist, steplist);
+    for a := 0 to moves.Count - 1 do
+      moves.Moves[a] := StrToInt(steplist[a]);
+    scorelist.Free;
+    steplist.Free;
+  end;
+
   for a := 0 to moves.Count - 1 do
   begin
     aithinkstep := oldaithinkstep;
@@ -1621,13 +1656,15 @@ begin
     if SideIsRed then RedboardUpdate(Aboard, moves.Moves[a])
     else BlackboardUpdate(Aboard, moves.Moves[a]);
 
-    value := -MutiMinMax(Aboard, Not SideIsRed, depth - 1, aithinkstep);
+    value := -MutiMinMax(Aboard, Not SideIsRed, depth - 1, -beta, -alpha, aithinkstep);
 
     if value > bestvalue then
     begin
       bestvalue := value;
+      if value > alpha then alpha := value;
       bestaithinkstep := aithinkstep;
     end;
+    if alpha >= beta then break;
   end;
   aithinkstep := bestaithinkstep;
   Result := bestvalue;
@@ -4204,8 +4241,8 @@ begin
 end;
 
 
-function TForm1.MinMaxRandom(Aboard:Tboard;SideIsRed:Boolean;depth:integer;var aithinkstep:string):integer;
-var a,b,c,d,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;oldaithinkstep:string;aithinksteplist:Tstringlist;//var a,b,c,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;sameboard:boolean;
+function TForm1.MinMaxRandom(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:string):integer;
+var a,b,c,d,bestvalue, value:integer;templist, scorelist, steplist:tstringlist;tempboard:Tboard;oldaithinkstep:string;aithinksteplist:Tstringlist;//var a,b,c,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;sameboard:boolean;
 begin
 //一般來說，這裡有一個判斷棋局是否結束的函數，
 //一旦棋局結束就不必繼續搜索了，直接返回極值。
@@ -4245,8 +4282,30 @@ begin
 //    templist:=MakeRedMoveAI(Aboard)
     MakeRedMove(Aboard,templist)
   else
-//    templist:=MakeBlackMoveAI(Aboard);
     MakeBlackMove(Aboard,templist);
+
+  if templist.Count > 1 then
+  begin
+    // Simple move ordering: sort moves based on a shallow search
+    scorelist := TStringList.Create;
+    steplist := TStringList.Create;
+    for a := 0 to templist.Count - 1 do
+    begin
+      tempboard := Aboard;
+      if SideIsRed then RedboardUpdate(tempboard, StrToInt(templist[a]))
+      else BlackboardUpdate(tempboard, StrToInt(templist[a]));
+      // Shallow search to get a rough value for the move
+      value := -EvaluateScore(tempboard, not SideIsRed);
+      scorelist.Add(IntToStr(value));
+      steplist.Add(templist[a]);
+    end;
+    Scoresort(scorelist, steplist);
+    templist.Clear;
+    templist.AddStrings(steplist);
+    scorelist.Free;
+    steplist.Free;
+  end;
+
   if templist.Count = 0 then
   begin
     if SideIsRed Then
@@ -4261,7 +4320,7 @@ begin
         result:= EvaluateScore(Aboard,SideIsRed);//直接返回對局面的估值
       exit;
     end;
-    result := -MinMax(Aboard,Not SideIsRed,depth,aithinkstep);//);//搜索子節點，注意前面的負號
+    result := -MinMax(Aboard,Not SideIsRed,depth, -beta, -alpha, aithinkstep);//);//搜索子節點，注意前面的負號
 //    if a+ b < 40 then
 //      result := result + 100;
     templist.Free;
@@ -4290,7 +4349,7 @@ begin
      RedboardUpdate(Aboard,strToint(templist[a]))
     else
       BlackboardUpdate(aboard,strToint(templist[a]));
-    value:= -MinMax(Aboard,Not SideIsRed,depth-1,aithinkstep);//);//搜索子節點，注意前面的負號
+    value:= -MinMax(Aboard,Not SideIsRed,depth-1, -beta, -alpha, aithinkstep);//);//搜索子節點，注意前面的負號
 
 //    if depth = Realdepth-1 then
 //      ProgressBar1.StepIt;
@@ -4315,10 +4374,12 @@ begin
 //      if value > bestvalue then
 //      begin
         bestvalue:=value;
+        if value > alpha then alpha := value;
 //        bestaithinkstep := aithinkstep;
         aithinksteplist.Clear;
         aithinksteplist.Add(aithinkstep)
       end;
+      if alpha >= beta then break;
     end;
   b:=Random(aithinksteplist.Count);
   AiMovelist := inttostr(8*strtoint(copy(aithinksteplist[b],3,1))+strtoint(copy(aithinksteplist[b],1,1))-8) + ' '+inttostr(bestvalue);
@@ -4329,10 +4390,10 @@ begin
   aithinksteplist.Free;
 end;
 
-function TForm1.MinMax(Aboard:Tboard;SideIsRed:Boolean;depth:integer;var aithinkstep:string):integer;
+function TForm1.MinMax(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:string):integer;
 var a,b,c,d,bestvalue, value, b_pos, c_pos, node_val, branch_best, start_idx, best_a_move:integer;
     moves, child_moves, grandchild_moves: TMoveArray;
-    templist,templist2, templist3:tstringlist;tempboard, tempboard2:Tboard;oldaithinkstep,bestaithinkstep:string;
+    templist,templist2, templist3, scorelist, steplist:tstringlist;tempboard, tempboard2:Tboard;oldaithinkstep,bestaithinkstep:string;
     child_boards, batch_boards: array of Tboard; gpu_scores, batch_scores: array of Integer;
 //var a,b,c,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;sameboard:boolean;
 begin
@@ -4410,10 +4471,12 @@ begin
               if batch_scores[c] > node_val then node_val := batch_scores[c];
 
             if node_val < branch_best then branch_best := node_val;
+            if branch_best <= alpha then break; // Pruning at minimizer level
           end
           else begin
             node_val := EvaluateScore(tempboard2, SideIsRed);
             if node_val < branch_best then branch_best := node_val;
+            if branch_best <= alpha then break; // Pruning
           end;
         end;
 
@@ -4422,6 +4485,7 @@ begin
         if branch_best > bestvalue then
         begin
           bestvalue := branch_best;
+          if branch_best > alpha then alpha := branch_best;
           best_a_move := moves.Moves[a];
           d := moves.Moves[a];
           b_pos := d div 8 + 1;
@@ -4429,6 +4493,7 @@ begin
           if c_pos = 0 then begin b_pos := b_pos - 1; c_pos := 8; end;
           bestaithinkstep := oldaithinkstep + '->' + intTostr(c_pos) + ',' + intTostr(b_pos);
         end;
+        if alpha >= beta then break; // Pruning at maximizer level
       end;
 
       if (best_a_move >= 0) and (depth > 1) and (not StopThink) then
@@ -4436,7 +4501,7 @@ begin
         tempboard := Aboard;
         if SideIsRed then RedboardUpdate(tempboard, best_a_move)
         else BlackboardUpdate(tempboard, best_a_move);
-        MinMax(tempboard, Not SideIsRed, depth - 1, bestaithinkstep);
+        MinMax(tempboard, Not SideIsRed, depth - 1, -INF, INF, bestaithinkstep);
       end;
 
       aithinkstep := bestaithinkstep;
@@ -4461,8 +4526,30 @@ begin
 //    templist:=MakeRedMoveAI(Aboard)
     MakeRedMove(Aboard,templist)
   else
-//    templist:=MakeBlackMoveAI(Aboard);
     MakeBlackMove(Aboard,templist);
+
+  if templist.Count > 1 then
+  begin
+    // Simple move ordering: sort moves based on a shallow search
+    scorelist := TStringList.Create;
+    steplist := TStringList.Create;
+    for a := 0 to templist.Count - 1 do
+    begin
+      tempboard := Aboard;
+      if SideIsRed then RedboardUpdate(tempboard, StrToInt(templist[a]))
+      else BlackboardUpdate(tempboard, StrToInt(templist[a]));
+      // Shallow search to get a rough value for the move
+      value := -EvaluateScore(tempboard, not SideIsRed);
+      scorelist.Add(IntToStr(value));
+      steplist.Add(templist[a]);
+    end;
+    Scoresort(scorelist, steplist);
+    templist.Clear;
+    templist.AddStrings(steplist);
+    scorelist.Free;
+    steplist.Free;
+  end;
+
   if templist.Count = 0 then
   begin
     if SideIsRed Then
@@ -4477,7 +4564,7 @@ begin
       exit;
     end;
     aithinkstep := aithinkstep +'->PASS';
-    result := -MinMax(Aboard,Not SideIsRed,depth,aithinkstep);//);//搜索子節點，注意前面的負號
+    result := -MinMax(Aboard,Not SideIsRed,depth, -beta, -alpha, aithinkstep);//);//搜索子節點，注意前面的負號
 //    if a+ b < 40 then
 //      result := result + 100;
     templist.Free;
@@ -4505,15 +4592,17 @@ begin
      RedboardUpdate(Aboard,strToint(templist[a]))
     else
       BlackboardUpdate(aboard,strToint(templist[a]));
-    value:= -MinMax(Aboard,Not SideIsRed,depth-1,aithinkstep);//);//搜索子節點，注意前面的負號
+    value:= -MinMax(Aboard,Not SideIsRed,depth-1, -beta, -alpha, aithinkstep);//);//搜索子節點，注意前面的負號
 
     if depth = Realdepth-1 then
       ProgressBar1.StepIt;
       if value > bestvalue then
       begin
         bestvalue:=value;
+        if value > alpha then alpha := value;
         bestaithinkstep := aithinkstep;
       end;
+      if alpha >= beta then break;
     end;
   templist.Free;
   aithinkstep :=bestaithinkstep;
@@ -4571,7 +4660,7 @@ begin
        begin
            FGpuEvalCount := 0;
            aimovelist := '';
-           a:= MutiMinMax(Aboard, ComputerIsRed, Realdepth, aimovelist);
+           a:= MutiMinMax(Aboard, ComputerIsRed, Realdepth, -INF, INF, aimovelist);
            aimovelist := copy(aimovelist,3,length(aimovelist)-2);
            AIDisplayScoreLabel.caption:=intTostr(a);
            redlist.Clear;
@@ -4592,7 +4681,7 @@ begin
          begin
                FGpuEvalCount := 0;
                aimovelist := '';
-               a:= MutiMinMax(Aboard, ComputerIsRed, Realdepth, aimovelist);
+               a:= MutiMinMax(Aboard, ComputerIsRed, Realdepth, -INF, INF, aimovelist);
                aimovelist := copy(aimovelist,3,length(aimovelist)-2);
                AIDisplayScoreLabel.caption:=intTostr(a);
                redlist.Clear;
@@ -4609,12 +4698,12 @@ begin
                exit;
          end
          else
-           a:=minMaxStart(Aboard,ComputerIsRed,Realdepth,thinkstep)
+           a:=minMaxStart(Aboard,ComputerIsRed,Realdepth, -INF, INF, thinkstep)
        end;
      end
  else
 
-    a:=minMaxRandom(Aboard,ComputerIsRed,Realdepth,thinkstep);
+    a:=minMaxRandom(Aboard,ComputerIsRed,Realdepth, -INF, INF, thinkstep);
   if ProgressBar1.Position < ProgressBar1.Max then
      ProgressBar1.Position := ProgressBar1.Max;
   if copy(thinkstep,1,1)='-' then
@@ -4655,7 +4744,7 @@ begin
 end;
 
 
-function TForm1.MinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;var aithinkstep:string):integer;
+function TForm1.MinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:string):integer;
 var a,b,c,d,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;scorelist,steplist:Tstringlist;aithinksteplist:Tstringlist;//bestaithinkstep:string;
 //var a,b,c,bestvalue, value:integer;templist:tstringlist;tempboard:Tboard;sameboard:boolean;
 begin
@@ -4695,8 +4784,30 @@ begin
 //    templist:=MakeRedMoveAI(Aboard)
     MakeRedMove(Aboard,templist)
   else
-//    templist:=MakeBlackMoveAI(Aboard);
     MakeBlackMove(Aboard,templist);
+
+  if templist.Count > 1 then
+  begin
+    // Simple move ordering: sort moves based on a shallow search
+    scorelist := TStringList.Create;
+    steplist := TStringList.Create;
+    for a := 0 to templist.Count - 1 do
+    begin
+      tempboard := Aboard;
+      if SideIsRed then RedboardUpdate(tempboard, StrToInt(templist[a]))
+      else BlackboardUpdate(tempboard, StrToInt(templist[a]));
+      // Shallow search to get a rough value for the move
+      value := -EvaluateScore(tempboard, not SideIsRed);
+      scorelist.Add(IntToStr(value));
+      steplist.Add(templist[a]);
+    end;
+    Scoresort(scorelist, steplist);
+    templist.Clear;
+    templist.AddStrings(steplist);
+    scorelist.Free;
+    steplist.Free;
+  end;
+
   if templist.Count = 0 then
   begin
     if SideIsRed Then
@@ -4717,7 +4828,7 @@ begin
 //      exit;
 //    end
 //    else begin
-      result := -MinMaxStart(Aboard,Not SideIsRed,depth,aithinkstep);//);//搜索子節點，注意前面的負號
+      result := -MinMaxStart(Aboard,Not SideIsRed,depth, -beta, -alpha, aithinkstep);//);//搜索子節點，注意前面的負號
  //     result := -MinMaxSecond(Aboard,Not SideIsRed,depth);//);//搜索子節點，注意前面的負號
 //      if a+ b < 40 then
 //        result := result + 100;
@@ -4739,7 +4850,7 @@ begin
      RedboardUpdate(Aboard,strToint(templist[a]))
     else
       BlackboardUpdate(aboard,strToint(templist[a]));
-    value:= -MinMax(Aboard,Not SideIsRed,depth -2,aithinkstep);//);//搜索子節點，注意前面的負號
+    value:= -MinMax(Aboard,Not SideIsRed,depth -2, -INF, INF, aithinkstep);//);//搜索子節點，注意前面的負號
     scorelist.add(inttostr(value));
 
    end;
@@ -4769,7 +4880,7 @@ begin
     else
       BlackboardUpdate(aboard,strToint(steplist[a]));
 
-    value:= -MinMax(Aboard,Not SideIsRed,depth-1,aithinkstep);//);//搜索子節點，注意前面的負號
+    value:= -MinMax(Aboard,Not SideIsRed,depth-1, -beta, -alpha, aithinkstep);//);//搜索子節點，注意前面的負號
 
 //    Aboard:=Tempboard;//撤銷剛才的一步;//恢復局面
 
@@ -4799,10 +4910,12 @@ begin
 //      if value > bestvalue then
 //      begin
         bestvalue:=value;
+        if value > alpha then alpha := value;
 //        if depth = Realdepth then
 //        aimovelist.Add(templist[a]+' '+intTostr(value));
        end;
 //      end;
+      if alpha >= beta then break;
     end;
 {
     else begin

@@ -12954,7 +12954,7 @@ object Form1: TForm1
     Left = 200
     Height = 20
     Top = 552
-    Width = 70
+    Width = 59
     Caption = 'Time: 0s'
     ParentColor = False
   end
@@ -13077,7 +13077,8 @@ object Form1: TForm1
     Top = 604
     Width = 62
     TabOrder = 6
-    Text = '7'
+    Text = '8'
+    OnChange = NornalDepthChange
   end
   object EndgameDepth: TEdit
     Left = 1020
