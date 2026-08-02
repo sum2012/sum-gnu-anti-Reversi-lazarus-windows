@@ -164,7 +164,6 @@ type
     Redlabel: TLabel;
     BlackLabel: TLabel;
     AIUsedTimeLabel: TLabel;
-    ProgressBar1: TProgressBar;
     Startposition2Button: TMenuItem;
     Startposition3Button: TMenuItem;
     Startposition4Button: TMenuItem;
@@ -909,7 +908,6 @@ begin
      AiListBox.clear;
      ThinkstepEdit.Text:= '';
      FGpuEvalCount := 0;
-     Application.ProcessMessages;
      tempdepth:= strToint(Endgamedepth.text);
      score(board,a,b);
      if a+b + tempdepth > 64 then
@@ -1932,7 +1930,6 @@ begin
     Updateboard;
     if (HumanVsComputer.Checked = true) and (FirstIsRed = true) or (ComputerVsHuman.Checked = true) and (FirstIsRed = false) then
     begin
-      Application.ProcessMessages;
       Sleep(2000);
       BlackChessclick(Timage(FindComponent(AI(board,False))));
 //      Updateboard; AiMoveList
@@ -1975,7 +1972,6 @@ begin
 //        if ComputerVsHuman.Checked = true then
         if (ComputerVsHuman.Checked = true) and (FirstIsRed = true) then
         begin
-          Application.ProcessMessages;
           Sleep(2000);
 //        RedChessclick(Timage(FindComponent(templist[0])));
           RedChessclick(Timage(FindComponent(AI(board,True))));
@@ -2450,7 +2446,6 @@ begin
 //    if ComputerVsHuman.Checked = true then
     if (HumanVsComputer.Checked = true) and (FirstIsRed = false) or (ComputerVsHuman.Checked = True) and (FirstIsRed = true) then
     begin
-      Application.ProcessMessages;
       Sleep(2000);
 //      RedChessclick(Timage(FindComponent(templist[0])));
       RedChessclick(Timage(FindComponent(AI(board,true))));
@@ -2492,7 +2487,6 @@ begin
 
     if (HumanVsComputer.Checked = true) and (FirstIsRed = true) or (HumanVsHuman.Checked = false) and (HumanVsComputer.Checked = false) and (FirstIsRed = true) then
         begin
-          Application.ProcessMessages;
           Sleep(2000);
           BlackChessclick(Timage(FindComponent(AI(board,False))));
         end;
@@ -3395,7 +3389,6 @@ begin
 //一般來說，這裡有一個判斷棋局是否結束的函數，
 //一旦棋局結束就不必繼續搜索了，直接返回極值。
 //但由於黑白棋不存在中途結束的情況，故省略。
-  Application.ProcessMessages;
 //  bestaithinkstep:=aithinkstep;
   Score(Aboard,a,b);
   if a = 0 then
@@ -3462,7 +3455,6 @@ begin
   oldaithinkstep := aithinkstep;
   for a := 0 to moves.Count - 1 do
   begin
-    Application.ProcessMessages;
     aithinkstep := oldaithinkstep;
     aithinkstep.Moves[aithinkstep.Count] := moves.Moves[a];
     inc(aithinkstep.Count);
@@ -3510,7 +3502,6 @@ var a,b,c,d,bestvalue, value, b_pos, c_pos, node_val, branch_best, best_a_move:i
     batch_scores: array of Integer;
     scores: array[0..63] of Integer;
 begin
-  Application.ProcessMessages;
   bestaithinkstep:=aithinkstep;
   Score(Aboard,a,b);
   if a = 0 then
@@ -3669,7 +3660,6 @@ begin
   oldaithinkstep := aithinkstep;
   for a := 0 to moves.Count - 1 do
   begin
-    Application.ProcessMessages;
     aithinkstep := oldaithinkstep;
     aithinkstep.Moves[aithinkstep.Count] := moves.Moves[a];
     inc(aithinkstep.Count);
@@ -3679,9 +3669,6 @@ begin
     else BlackboardUpdate(Aboard, moves.Moves[a]);
 
     value := -MinMax(Aboard, Not SideIsRed, depth - 1, -beta, -alpha, aithinkstep);
-
-    if depth = Realdepth - 1 then
-      ProgressBar1.StepIt;
 
     if value > bestvalue then
     begin
@@ -3701,7 +3688,6 @@ begin
   t1 := GetTickCount64;
   AiListBox.Clear;
   thinkstep.Count := 0;
-  Application.ProcessMessages;
   Score(board,a,b);
   if (a+b < 64) and (TParallel.MaxThreadCount > 1) then
   begin
@@ -3726,9 +3712,6 @@ begin
     Realdepth:= 64-a-b
   else
     Realdepth:= strToint(Nornaldepth.Text);
-  ProgressBar1.Max :=0;
-  ProgressBar1.Max:=ThinkNumber(Aboard,ComputerIsRed,Realdepth);
-  ProgressBar1.Step:=1;
   if ComputerIsRed = true then
   begin
       MakeRedMove(Aboard,redlist);
@@ -3781,8 +3764,6 @@ begin
  else
 
     a:=minMaxRandom(Aboard,ComputerIsRed,Realdepth, -INF, INF, thinkstep);
-  if ProgressBar1.Position < ProgressBar1.Max then
-     ProgressBar1.Position := ProgressBar1.Max;
   redlist.Clear;
   blacklist.Clear;
   ThinkstepEdit.text:=MoveArrayToThinkStep(thinkstep);
@@ -3825,7 +3806,6 @@ var a,b,c,d,bestvalue, value:integer; moves: TMoveArray; tempboard:Tboard;
     best_paths: array of TMoveArray;
     current_path: TMoveArray;
 begin
-  Application.ProcessMessages;
   Score(Aboard,a,b);
   if a = 0 then
   begin
@@ -3937,7 +3917,6 @@ function TForm1.ThinkNumber(Aboard:Tboard;SideIsRed:Boolean;depth:integer):integ
 var a,b:integer; moves: TMoveArray; tempboard:Tboard;
 begin
   Result := 0;
-  Application.ProcessMessages;
   Score(Aboard, a, b);
 
   if a = 0 then exit;

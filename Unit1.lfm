@@ -13088,13 +13088,6 @@ object Form1: TForm1
     TabOrder = 7
     Text = '13'
   end
-  object ProgressBar1: TProgressBar
-    Left = 48
-    Height = 26
-    Top = 804
-    Width = 776
-    TabOrder = 8
-  end
   object ThinkstepEdit: TEdit
     Left = 48
     Height = 28
