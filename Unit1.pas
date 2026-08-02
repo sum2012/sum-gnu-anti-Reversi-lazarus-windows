@@ -3531,7 +3531,7 @@ end;
 
 function TForm1.MinMaxRandom(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
 var a,b,c,d,bestvalue, value:integer; moves: TMoveArray; tempboard:Tboard;
-    oldaithinkstep: TMoveArray;
+    oldaithinkstep, bestaithinkstep: TMoveArray;
     aithinksteplist: array of TMoveArray;
     scores: array[0..63] of Integer;
 begin
