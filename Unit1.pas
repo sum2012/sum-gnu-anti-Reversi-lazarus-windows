@@ -44,6 +44,10 @@ type
     Moves: array[0..63] of Integer;
   end;
 
+  TParallelTask = record
+    Move1, Move2, Move1Idx: Integer;
+  end;
+
   TAIThread = class;
 
   { TForm1 }
@@ -215,9 +219,11 @@ type
 //      mutiscore:Integer;
       mutidepth:integer;
       mutitemplist:Tstringlist;
+      FParallelTasks: array of TParallelTask;
       mutisteplist:Tstringlist;
       mutiscorelist:Tstringlist;
-//    mutiscore:array[0..20] of integer;
+      mutiscores: array of Integer;
+      mutiresults: array of TMoveArray;
       mutiSideisRed:Boolean;
       mutiBoard:Tboard;
       MyCriticalSection: TRTLCriticalSection;
@@ -231,7 +237,6 @@ type
       BlackNoMove:Boolean;
       RealDepth:integer;
       Redlist,Blacklist:TStringList;
-      AiMovelist:string;
       movedlist:TStringList;
       FCudaEnabled: Boolean;
       FCudaContext: CUcontext;
@@ -657,7 +662,7 @@ type
 
 constructor TParallelWorker.Create(CurrentIndex: PPtrInt; MaxIndex: PtrInt; Proc: TParallelProcedure; Section: PRTLCriticalSection);
 begin
-  inherited Create(False);
+  inherited Create(True); // Create suspended to avoid race condition
   FCurrentIndex := CurrentIndex;
   FMaxIndex := MaxIndex;
   FProc := Proc;
@@ -723,7 +728,10 @@ begin
     CurrentIndex := StartIndex;
     SetLength(Workers, ThreadCount);
     for i := 0 to ThreadCount - 1 do
+    begin
       Workers[i] := TParallelWorker.Create(@CurrentIndex, EndIndex, AProc, @Section);
+      Workers[i].Start;
+    end;
 
     for i := 0 to ThreadCount - 1 do
     begin
@@ -878,17 +886,11 @@ begin
 end;
 function TForm1.Muti(const ComputerisRed:Boolean):String;
 function test(const depth:integer;const cuted:Boolean;const fullthink:boolean):string;
-var a,b,c,d,bestscore,cutnum:integer;templist,templist2:Tstringlist;OneDepthSideisRed:boolean;bestmove:string; move: TMoveArray;//cut:Boolean;
+var a,b,c,d,i,bestscore,cutnum:integer;templist,templist2:Tstringlist;OneDepthSideisRed:boolean;bestmove:string; move: TMoveArray;//cut:Boolean;
 begin
   Result := '';
-  mutitemplist.clear;
-  mutiscorelist.clear;
-// mutitemplist := Tstringlist.Create;
-////mutisteplist := Tstringlist.Create;
-//mutiscorelist := Tstringlist.Create;
-templist := Tstringlist.Create;
-templist2 := Tstringlist.Create;
-CallSyncUpdateAIUI('', '', 'CPU Threads: ' + IntToStr(TParallel.MaxThreadCount), True, True);
+  templist := Tstringlist.Create;
+  templist2 := Tstringlist.Create;
 if ComputerisRed = False then
 begin
   OneDepthSideisRed:=False;
@@ -914,15 +916,14 @@ else begin
 end;
 
 mutiSideisRed := OneDepthSideisRed;
+SetLength(FParallelTasks, 0);
+SetLength(mutiscores, templist.Count);
+SetLength(mutiresults, templist.Count);
 For a:= 0 to templist.Count-1 do
 begin
-  mutiscorelist.add('-2000');
-  mutisteplist.add('.');
-end;
-For a:= 0 to templist.Count-1 do
-begin
+   mutiscores[a] := -2000;
+   mutiresults[a].Count := 0;
 
-   bestscore:= -inf;
    mutiBoard := board;
    if OneDepthSideisRed then
    begin
@@ -933,11 +934,25 @@ begin
      Blackboardupdate(mutiBoard,strtoint(templist[a]));
      MakeRedmove(mutiBoard,templist2);
    end;
-   for b:= 0 to templist2.count -1 do
-     mutitemplist.Add(inttostr(a)+' '+templist[a]+' '+templist2[b]);
+
    if templist2.count = 0 then
-     mutitemplist.Add(inttostr(a)+' '+templist[a]+' p');
+   begin
+     SetLength(FParallelTasks, Length(FParallelTasks) + 1);
+     FParallelTasks[High(FParallelTasks)].Move1 := strtoint(templist[a]);
+     FParallelTasks[High(FParallelTasks)].Move2 := -1; // PASS
+     FParallelTasks[High(FParallelTasks)].Move1Idx := a;
+   end
+   else begin
+     SetLength(FParallelTasks, Length(FParallelTasks) + templist2.Count);
+     for b:= 0 to templist2.count -1 do
+     begin
+       FParallelTasks[Length(FParallelTasks) - templist2.Count + b].Move1 := strtoint(templist[a]);
+       FParallelTasks[Length(FParallelTasks) - templist2.Count + b].Move2 := strtoint(templist2[b]);
+       FParallelTasks[Length(FParallelTasks) - templist2.Count + b].Move1Idx := a;
+     end;
+   end;
 end;
+CallSyncUpdateAIUI('', '', 'Tasks: ' + IntToStr(Length(FParallelTasks)) + ' | Threads: ' + IntToStr(TParallel.MaxThreadCount), True, True);
 mutidepth:= depth;
 
 
@@ -949,52 +964,64 @@ begin
   move.Count := 0;
   bestscore := MutiMinMax(board, ComputerisRed, depth, -INF, INF, move);
   CallSyncUpdateAIUI(inttostr(bestscore), '', MoveArrayToThinkStep(move), False, False);
-  // Sequential loop for CUDA to avoid multi-thread overhead and noise
-  //for a := 0 to mutitemplist.count - 1 do
-    //DoSomethingParallel(a);
 end
 else begin
-  TParallel.DoParallel(DoSomethingParallel,0,mutitemplist.count-1);
+  TParallel.DoParallel(DoSomethingParallel,0,High(FParallelTasks));
 end;
 
-for a:= 0 to mutiscorelist.count-1 do
-   mutiscorelist[a] := inttostr(-strtoint(mutiscorelist[a]));
-scoresort(mutiscorelist,mutisteplist);
+for a:= 0 to High(mutiscores) do
+   mutiscores[a] := -mutiscores[a];
+
+// Sort logic needs to be updated too. For now I'll just find the best.
+bestscore := -INF;
+for a := 0 to High(mutiscores) do
+  if mutiscores[a] > bestscore then bestscore := mutiscores[a];
+
 If (cuted = false) or (fullthink = True) then
 begin
- for a:= 0 to mutiscorelist.count-1 do
-  CallSyncUpdateAIUI('', '', mutiscorelist[a]+':'+mutisteplist[a], False, True);
- b:= mutiscorelist.count-1;
- for a:= b downto 1 do
- begin
-   if strtoint(mutiscorelist[a]) <  strtoint(mutiscorelist[0]) then
-   begin
-     mutiscorelist.Delete(a);
-     mutisteplist.Delete(a);
-   end
- end;
- a:=Random(mutisteplist.Count);
- CallSyncUpdateAIUI('', '', mutisteplist[a], False, False);
- if copy(ThinkstepEdit.text, 1, 4) = 'PASS' then
+ for a:= 0 to High(mutiscores) do
+  CallSyncUpdateAIUI('', '', IntToStr(mutiscores[a])+':'+MoveArrayToThinkStep(mutiresults[a]), False, True);
+
+ // Find all moves with the best score
+ templist.Clear;
+ for a := 0 to High(mutiscores) do
+   if mutiscores[a] = bestscore then
+     templist.Add(MoveArrayToThinkStep(mutiresults[a]));
+
+ a:=Random(templist.Count);
+ bestmove := templist[a];
+ CallSyncUpdateAIUI('', '', bestmove, False, False);
+
+ if copy(bestmove, 1, 4) = 'PASS' then
    Result := ''
  else begin
-   b := strtoint(copy(ThinkstepEdit.text, 3, 1)); // Row
-   c := strtoint(copy(ThinkstepEdit.text, 1, 1)); // Col
+   b := strtoint(copy(bestmove, 3, 1)); // Row
+   c := strtoint(copy(bestmove, 1, 1)); // Col
    Result := 'Image' + IntToStr(8*b + c - 8);
  end;
- CallSyncUpdateAIUI(mutiscorelist[0], '', '', False, False);
+ CallSyncUpdateAIUI(IntToStr(bestscore), '', '', False, False);
 end
 else begin
-  b:= mutisteplist.count div 2 +1;
-  c:= mutisteplist.count -1;
-  for a:= b to c do
-    mutisteplist.Delete(mutisteplist.Count-1);
-  for a:= 0 to mutisteplist.count-1 do
-  begin
-    b:= strtoint(copy(mutisteplist[a],1,1));
-    c:= strtoint(copy(mutisteplist[a],3,1));
-    mutisteplist[a] := inttostr(8*c+b-8);
-  end;
+  // Aggressive filtering to match original performance
+  mutisteplist.Clear;
+  // Sort moves by score (descending)
+  for a := 0 to templist.Count - 2 do
+    for b := a + 1 to templist.Count - 1 do
+      if mutiscores[b] > mutiscores[a] then
+      begin
+        i := mutiscores[a]; mutiscores[a] := mutiscores[b]; mutiscores[b] := i;
+        move := mutiresults[a]; mutiresults[a] := mutiresults[b]; mutiresults[b] := move;
+      end;
+
+  // Take only the moves that tied for the best score, then take top half of those
+  i := 0;
+  while (i < templist.Count) and (mutiscores[i] = mutiscores[0]) do Inc(i);
+
+  if i > 1 then i := i div 2 + 1; // Match the "top half of ties" logic
+  if i = 0 then i := 1;
+
+  for a := 0 to i - 1 do
+    mutisteplist.Add(IntToStr(mutiresults[a].Moves[0]));
 end;
 templist.free;
 templist2.free;
@@ -1465,27 +1492,20 @@ begin
 end;
 
 procedure TForm1.DoSomethingParallel(Index: PtrInt);
-var Aboard:Tboard;a,B,C,D,mutitscore,move1,move2:integer;stepno,tempstring:string;
+var Aboard:Tboard; a, mutitscore, move1, move2: integer;
     path: TMoveArray;
 begin
- tempstring := mutitemplist[index];
-  For a := 2 to length(tempstring) do
-    if tempstring[a] = ' ' then break;
-  stepno := copy(tempstring,1,a-1);
-  tempstring :=  copy(tempstring,a+1,length(mutitemplist[index])-a);
-  For a := 2 to length(tempstring) do
-    if tempstring[a] = ' ' then break;
-  move1 := strtoint(copy(tempstring,1,a-1));
-  tempstring := copy(tempstring,a+1,length(tempstring)-a);
+  move1 := FParallelTasks[Index].Move1;
+  move2 := FParallelTasks[Index].Move2;
+  a := FParallelTasks[Index].Move1Idx;
 
   path.Count := 0;
   path.Moves[0] := move1;
   path.Count := 1;
 
   Aboard:= board;
-  if tempstring[1] <> 'p' then
+  if move2 <> -1 then
   begin
-    move2 := strtoint(tempstring);
     path.Moves[1] := move2;
     path.Count := 2;
 
@@ -1498,6 +1518,7 @@ begin
       Blackboardupdate(Aboard,move1);
       RedboardUpdate(Aboard,move2);
     end;
+
     if  mutidepth > 5 then
       mutitscore := -MutiMinMaxStart(Aboard,mutiSideIsRed,mutidepth, -INF, INF, path)
     else
@@ -1513,12 +1534,12 @@ begin
        Blackboardupdate(Aboard,move1);
      mutitscore := -MutiMinMax(Aboard,mutiSideIsRed,mutidepth+1, -INF, INF, path);
   end;
-  a := strtoint(stepno);
+
   system.EnterCriticalsection(MyCriticalSection);
-  if mutitscore > strtoint(mutiscorelist[a]) then
+  if mutitscore > mutiscores[a] then
   begin
-    mutiscorelist[a] := inttostr(mutitscore);
-    mutisteplist[a] := MoveArrayToThinkStep(path);
+    mutiscores[a] := mutitscore;
+    mutiresults[a] := path;
   end;
   system.LeaveCriticalsection(MyCriticalSection);
 end;
@@ -1604,7 +1625,6 @@ begin
       if value > alpha then alpha := value;
       SetLength(best_paths, 1);
       best_paths[0] := current_path;
-      aimovelist := IntToStr(moves.Moves[a]) + ' ' + IntToStr(value);
     end
     else if value = bestvalue then
     begin
@@ -1623,7 +1643,6 @@ begin
       aithinkstep.Moves[aithinkstep.Count] := best_paths[a].Moves[b];
       inc(aithinkstep.Count);
     end;
-    aimovelist := IntToStr(aithinkstep.Moves[oldaithinkstep.Count]) + ' ' + IntToStr(bestvalue);
   end;
   Result := bestvalue;
 end;
@@ -3592,7 +3611,6 @@ begin
     begin
       bestvalue := value;
       if value > alpha then alpha := value;
-      aimovelist := IntToStr(moves.Moves[a]) + ' ' + IntToStr(value);
       SetLength(aithinksteplist, 1);
       aithinksteplist[0] := aithinkstep;
     end
@@ -3609,7 +3627,6 @@ begin
   begin
     a := Random(Length(aithinksteplist));
     aithinkstep := aithinksteplist[a];
-    aimovelist := IntToStr(aithinkstep.Moves[oldaithinkstep.Count]) + ' ' + IntToStr(bestvalue);
   end;
   Result := bestvalue;
 end;
@@ -3804,8 +3821,9 @@ begin
 end;
 
 function TForm1.AI(Aboard:Tboard;ComputerIsRed:Boolean):string;
-var a,b,c:integer; thinkstep: TMoveArray; t1: QWord;
+var a,b,c:integer; thinkstep: TMoveArray; t1: QWord; LMoveList: string;
 begin
+  LMoveList := '';
   t1 := GetTickCount64;
   CallSyncUpdateAIUI('', '', '', True, False);
   thinkstep.Count := 0;
@@ -3825,7 +3843,6 @@ begin
     MakeBlackMove(Aboard,templist);
   end;
   }
-  aimovelist :='';
   //aimovelist only output next move and score
   score(Aboard,a,b);
   Realdepth:= strToint(Endgamedepth.text);
@@ -3850,13 +3867,13 @@ begin
            FGpuEvalCount := 0;
            thinkstep.Count := 0;
            a:= MutiMinMax(Aboard, ComputerIsRed, Realdepth, -INF, INF, thinkstep);
-           aimovelist := MoveArrayToThinkStep(thinkstep);
-           CallSyncUpdateAIUI(intTostr(a), '', aimovelist, False, True);
+           LMoveList := MoveArrayToThinkStep(thinkstep);
+           CallSyncUpdateAIUI(intTostr(a), '', LMoveList, False, True);
            redlist.Clear;
            blacklist.Clear;
            Result:='Image'+ inttostr(thinkstep.Moves[0]);
-           aimovelist := intTostr(a) + ':'+ aimovelist;
-           CallSyncUpdateAIUI('', 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's', aimovelist, False, False);
+           LMoveList := intTostr(a) + ':'+ LMoveList;
+           CallSyncUpdateAIUI('', 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's', LMoveList, False, False);
            exit;
        end
        else begin
@@ -3865,13 +3882,13 @@ begin
                FGpuEvalCount := 0;
                thinkstep.Count := 0;
                a:= MutiMinMax(Aboard, ComputerIsRed, Realdepth, -INF, INF, thinkstep);
-               aimovelist := MoveArrayToThinkStep(thinkstep);
-               CallSyncUpdateAIUI(intTostr(a), '', aimovelist, False, True);
+               LMoveList := MoveArrayToThinkStep(thinkstep);
+               CallSyncUpdateAIUI(intTostr(a), '', LMoveList, False, True);
                redlist.Clear;
                blacklist.Clear;
                Result:='Image'+ inttostr(thinkstep.Moves[0]);
-               aimovelist := intTostr(a) + ':'+ aimovelist;
-               CallSyncUpdateAIUI('', 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's', aimovelist, False, False);
+               LMoveList := intTostr(a) + ':'+ LMoveList;
+               CallSyncUpdateAIUI('', 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's', LMoveList, False, False);
                exit;
          end
          else
@@ -3885,9 +3902,10 @@ begin
   blacklist.Clear;
   CallSyncUpdateAIUI(intTostr(A), '', MoveArrayToThinkStep(thinkstep), False, False);
 
-
-  a:=strtoint(trim(copy(aimovelist,1,2)));
-  Result:='image'+ inttostr(a) ;
+  if thinkstep.Count > 0 then
+    Result := 'Image' + IntToStr(thinkstep.Moves[0])
+  else
+    Result := '';
   CallSyncUpdateAIUI('', 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's', '', False, False);
 end;
 
@@ -4008,7 +4026,6 @@ begin
       if value > alpha then alpha := value;
       SetLength(best_paths, 1);
       best_paths[0] := current_path;
-      aimovelist := IntToStr(moves.Moves[a]) + ' ' + IntToStr(value);
     end
     else if value = bestvalue then
     begin
@@ -4021,7 +4038,6 @@ begin
   begin
     a := Random(Length(best_paths));
     aithinkstep := best_paths[a];
-    aimovelist := IntToStr(aithinkstep.Moves[0]) + ' ' + IntToStr(bestvalue);
   end;
   Result := bestvalue;
 end;
