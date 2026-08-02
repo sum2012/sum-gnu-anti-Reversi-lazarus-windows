@@ -3,10 +3,11 @@ name: Lazarus Build for Windows
 on:
   push:
     branches:
-      - main
+      - master
   pull_request:
     branches:
-      - main
+      - master
+  workflow_dispatch:
 
 jobs:
   build:
@@ -14,24 +15,22 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Lazarus
-        run: |
-          # Download and install Lazarus
-          choco install lazarus -y
-          # Add Lazarus to PATH
-          echo "C:\Program Files (x86)\Lazarus" >> $env:GITHUB_PATH
+        uses: gcarreno/setup-lazarus@v3
+        with:
+          lazarus-version: stable
 
       - name: Build Lazarus Project
         run: |
-          # Navigate to the project directory
-          cd ${{ github.workspace }}
-          # Build the project using Lazarus
-          lazbuild.exe --cpu=x86_64 --os=win64 --build-mode=Release --build-compiler=fpc --build-config=Release --build-profile=Release --build-flags="-dRelease" --build-target=win64 --build-output-dir="bin" "SumAntiReversi8x8.lpi"
+          lazbuild --cpu=x86_64 --os=win64 SumAntiReversi8x8.lpi
 
       - name: Archive build artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: Windows Build
-          path: bin/
+          path: |
+            *.exe
+            *.dll
+            bin/
