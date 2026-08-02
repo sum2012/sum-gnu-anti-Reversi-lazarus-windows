@@ -172,7 +172,6 @@ type
     ThinkstepEdit: TEdit;
     StartpositionButton: TMenuItem;
     Startposition6utton: TMenuItem;
-    StopThinkButton: TMenuItem;
     Tojavaboardbutton: TMenuItem;
     Timer1: TTimer;
     procedure CudaEnabledMenuItemClick(Sender: TObject);
@@ -212,7 +211,6 @@ type
     procedure Startposition1ButtonClick(Sender: TObject);
     procedure StartpositionButtonClick(Sender: TObject);
     procedure Startposition6uttonClick(Sender: TObject);
-    procedure StopThinkButtonClick(Sender: TObject);
     procedure TojavaboardbuttonClick(Sender: TObject);
   private
 //      mutistep:Boolean;
@@ -225,7 +223,6 @@ type
       mutiSideisRed:Boolean;
       mutiBoard:Tboard;
       MyCriticalSection: TRTLCriticalSection;
-      StopThink:Boolean;
       initboard,board:Tboard;
       FirstIsRed:Boolean;
       NotInBack:Boolean;
@@ -731,7 +728,6 @@ begin
 
   system.InitCriticalSection(MyCriticalSection);
  randomize;
-  StopThink:=False;
 //  RedMove:=True;
   Initboard.Red := 0;
   Initboard.Black := 0;
@@ -1528,7 +1524,7 @@ begin
   end;
 
   // Unified Subtree Batching at Depth 6 (GPU Boost)
-  if (depth = 6) and FCudaEnabled and (not StopThink) then
+  if (depth = 6) and FCudaEnabled then
   begin
     if SideIsRed then FastMakeRedMove(Aboard, moves)
     else FastMakeBlackMove(Aboard, moves);
@@ -1632,7 +1628,7 @@ begin
     end;
   end;
 
-  if (depth <= 0) or (a + b > 63) or StopThink then
+  if (depth <= 0) or (a + b > 63) then
   begin
     Result := EvaluateScore(Aboard, SideIsRed);
     exit;
@@ -2302,10 +2298,6 @@ begin
   Updateboard;
 end;
 
-procedure TForm1.StopThinkButtonClick(Sender: TObject);
-begin
-  StopThink:=True;
-end;
 
 procedure TForm1.BlackBoardUpdate(var Aboard:Tboard;LastChess:Integer);
 var
@@ -3497,7 +3489,7 @@ begin
     exit;
   end;
   // x25 Power Boost: High-Performance GPU Subtree Evaluation at Depth 6
-  if (depth=6) and FCudaEnabled and (not StopThink) then
+  if (depth=6) and FCudaEnabled then
   begin
     if SideIsRed then FastMakeRedMove(Aboard, moves)
     else FastMakeBlackMove(Aboard, moves);
@@ -3510,7 +3502,6 @@ begin
 
       for a := 0 to moves.Count - 1 do
       begin
-        if StopThink then break;
         tempboard := Aboard;
         if SideIsRed then RedboardUpdate(tempboard, moves.Moves[a])
         else BlackboardUpdate(tempboard, moves.Moves[a]);
@@ -3571,7 +3562,7 @@ begin
         if alpha >= beta then break; // Pruning at maximizer level
       end;
 
-      if (best_a_move >= 0) and (depth > 1) and (not StopThink) then
+      if (best_a_move >= 0) and (depth > 1) then
       begin
         tempboard := Aboard;
         if SideIsRed then RedboardUpdate(tempboard, best_a_move)
@@ -3585,7 +3576,7 @@ begin
     end;
   end;
 
-  if (depth <= 0) or (a + b > 63) or StopThink then //葉子節點
+  if (depth <= 0) or (a + b > 63) then //葉子節點
   begin
     Result := EvaluateScore(Aboard, SideIsRed);
     exit;
@@ -3669,7 +3660,6 @@ begin
     AIUsedTimeLabel.Caption := 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's';
     exit;
   end;
-  StopThinkButton.Enabled:=True;
 // http://blog.csdn.net/nowcan/archive/2004/10/19/142994.aspx
 // 其實所有戰術都是減低對方行動力,最後逼對方行死位.
 {
@@ -3715,8 +3705,6 @@ begin
            aimovelist := AIDisplayScoreLabel.caption + ':'+ aimovelist;
            AiListBox.Items.Add(aimovelist);
            ThinkstepEdit.text:=aimovelist;
-           StopThinkButton.Enabled:=False;
-           StopThink:=False;
            AIUsedTimeLabel.Caption := 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's';
            exit;
        end
@@ -3734,8 +3722,6 @@ begin
                aimovelist := AIDisplayScoreLabel.caption + ':'+ aimovelist;
                AiListBox.Items.Add(aimovelist);
                ThinkstepEdit.text:=aimovelist;
-               StopThinkButton.Enabled:=False;
-               StopThink:=False;
                AIUsedTimeLabel.Caption := 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's';
                exit;
          end
@@ -3756,8 +3742,6 @@ begin
 
   a:=strtoint(trim(copy(aimovelist,1,2)));
   Result:='image'+ inttostr(a) ;
-  StopThinkButton.Enabled:=False;
-  StopThink:=False;
   AIUsedTimeLabel.Caption := 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's';
 end;
 
