@@ -1648,71 +1648,59 @@ begin
 end;
 
 function TForm1.MutiMinMax(Aboard: Tboard; const SideIsRed: Boolean; const depth: integer; alpha, beta: integer; var aithinkstep: TMoveArray): integer;
-type
-  TBranchInfo = record
-    a_idx, b_idx: Integer;
-    b_move: Integer;
-    start_idx, count: Integer;
-    moves_c: array of Integer;
-  end;
 var
-  a, b, c, d, bestvalue, value, b_pos, c_pos, i: integer;
-  moves: TMoveArray;
-  node_val, branch_best, best_a_move, best_b_move, best_c_move, temp_best_c: integer;
-  oldaithinkstep, bestaithinkstep: TMoveArray;
-  child_moves, grandchild_moves: TMoveArray;
-  tempboard, tempboard2: Tboard;
-  batch_boards: array of Tboard;
-  batch_scores: array of Integer;
-  branch_info: array of TBranchInfo;
-  branch_count: Integer;
-  a_best, a_best_b, a_best_c: array of Integer;
-  scores: array[0..63] of Integer;
-begin
-  a := 0; b := 0;
-  Score(Aboard, a, b);
-  if a = 0 then
-  begin
-    if SideIsRed then Result := 2000 else Result := -2000;
-    exit;
-  end;
-  if b = 0 then
-  begin
-    if SideIsRed then Result := -2000 else Result := 2000;
-    exit;
-  end;
+  i, rScore, bScore, l_bestvalue, l_value: integer;
+  l_moves: TMoveArray;
+  l_oldaithinkstep, l_bestaithinkstep: TMoveArray;
+  l_tempboard, l_tempboard2: Tboard;
+  l_scores: array[0..63] of Integer;
 
-  // Unified Subtree Batching at Depth 6 (GPU Boost)
-  if (depth = 6) and FCudaEnabled then
+  function DoGPUBatching: Boolean;
+  type
+    TBranchInfo = record
+      a_idx, b_idx: Integer;
+      b_move: Integer;
+      start_idx, count: Integer;
+      moves_c: array of Integer;
+    end;
+  var
+    a, b, c, j, node_val, best_a_move, branch_count: Integer;
+    child_moves, grandchild_moves: TMoveArray;
+    g_tempboard, g_tempboard2: Tboard;
+    batch_boards: array of Tboard;
+    batch_scores: array of Integer;
+    branch_info: array of TBranchInfo;
+    a_best: array of Integer;
+    g_oldaithinkstep: TMoveArray;
   begin
-    if SideIsRed then FastMakeRedMove(Aboard, moves)
-    else FastMakeBlackMove(Aboard, moves);
+    Result := False;
+    if SideIsRed then FastMakeRedMove(Aboard, l_moves)
+    else FastMakeBlackMove(Aboard, l_moves);
 
-    if moves.Count > 0 then
+    if l_moves.Count > 0 then
     begin
-      bestvalue := -INF;
-      oldaithinkstep := aithinkstep;
+      g_oldaithinkstep := aithinkstep;
       branch_count := 0;
       SetLength(batch_boards, 0);
       SetLength(branch_info, 0);
 
-      for a := 0 to moves.Count - 1 do
+      for a := 0 to l_moves.Count - 1 do
       begin
-        tempboard := Aboard;
-        if SideIsRed then RedboardUpdate(tempboard, moves.Moves[a])
-        else BlackboardUpdate(tempboard, moves.Moves[a]);
+        g_tempboard := Aboard;
+        if SideIsRed then RedboardUpdate(g_tempboard, l_moves.Moves[a])
+        else BlackboardUpdate(g_tempboard, l_moves.Moves[a]);
 
-        if (not SideIsRed) then FastMakeRedMove(tempboard, child_moves)
-        else FastMakeBlackMove(tempboard, child_moves);
+        if (not SideIsRed) then FastMakeRedMove(g_tempboard, child_moves)
+        else FastMakeBlackMove(g_tempboard, child_moves);
 
         for b := 0 to child_moves.Count - 1 do
         begin
-          tempboard2 := tempboard;
-          if (not SideIsRed) then RedboardUpdate(tempboard2, child_moves.Moves[b])
-          else BlackboardUpdate(tempboard2, child_moves.Moves[b]);
+          g_tempboard2 := g_tempboard;
+          if (not SideIsRed) then RedboardUpdate(g_tempboard2, child_moves.Moves[b])
+          else BlackboardUpdate(g_tempboard2, child_moves.Moves[b]);
 
-          if SideIsRed then FastMakeRedMove(tempboard2, grandchild_moves)
-          else FastMakeBlackMove(tempboard2, grandchild_moves);
+          if SideIsRed then FastMakeRedMove(g_tempboard2, grandchild_moves)
+          else FastMakeBlackMove(g_tempboard2, grandchild_moves);
 
           if grandchild_moves.Count > 0 then
           begin
@@ -1729,7 +1717,7 @@ begin
             for c := 0 to grandchild_moves.Count - 1 do
             begin
               branch_info[branch_count-1].moves_c[c] := grandchild_moves.Moves[c];
-              batch_boards[branch_info[branch_count-1].start_idx + c] := tempboard2;
+              batch_boards[branch_info[branch_count-1].start_idx + c] := g_tempboard2;
               if SideIsRed then RedboardUpdate(batch_boards[branch_info[branch_count-1].start_idx + c], grandchild_moves.Moves[c])
               else BlackboardUpdate(batch_boards[branch_info[branch_count-1].start_idx + c], grandchild_moves.Moves[c]);
             end;
@@ -1742,124 +1730,144 @@ begin
         SetLength(batch_scores, Length(batch_boards));
         BatchEvaluateOnGPU(batch_boards, SideIsRed, batch_scores);
 
-        SetLength(a_best, moves.Count);
-        for a := 0 to moves.Count - 1 do a_best[a] := INF;
+        SetLength(a_best, l_moves.Count);
+        for a := 0 to l_moves.Count - 1 do a_best[a] := INF;
 
-        for i := 0 to branch_count - 1 do
+        for j := 0 to branch_count - 1 do
         begin
            node_val := -INF;
-           for c := 0 to branch_info[i].count - 1 do
-              if batch_scores[branch_info[i].start_idx + c] > node_val then
-                 node_val := batch_scores[branch_info[i].start_idx + c];
+           for c := 0 to branch_info[j].count - 1 do
+              if batch_scores[branch_info[j].start_idx + c] > node_val then
+                 node_val := batch_scores[branch_info[j].start_idx + c];
 
-           if node_val < a_best[branch_info[i].a_idx] then
-              a_best[branch_info[i].a_idx] := node_val;
+           if node_val < a_best[branch_info[j].a_idx] then
+              a_best[branch_info[j].a_idx] := node_val;
         end;
 
-        bestvalue := -INF;
+        l_bestvalue := -INF;
         best_a_move := -1;
-        for a := 0 to moves.Count - 1 do
+        for a := 0 to l_moves.Count - 1 do
         begin
           if a_best[a] = INF then a_best[a] := EvaluateScore(Aboard, SideIsRed);
-          if a_best[a] > bestvalue then
+          if a_best[a] > l_bestvalue then
           begin
-            bestvalue := a_best[a];
-            best_a_move := moves.Moves[a];
+            l_bestvalue := a_best[a];
+            best_a_move := l_moves.Moves[a];
           end;
         end;
 
         if best_a_move >= 0 then
         begin
-           aithinkstep := oldaithinkstep;
+           aithinkstep := g_oldaithinkstep;
            aithinkstep.Moves[aithinkstep.Count] := best_a_move;
            inc(aithinkstep.Count);
 
-           // Path Recovery: Continue searching below the GPU batching level
-           tempboard := Aboard;
-           if SideIsRed then RedboardUpdate(tempboard, best_a_move)
-           else BlackboardUpdate(tempboard, best_a_move);
-           MutiMinMax(tempboard, Not SideIsRed, depth - 1, -INF, INF, aithinkstep);
-
-           Result := bestvalue;
-           exit;
+           l_tempboard := Aboard;
+           if SideIsRed then RedboardUpdate(l_tempboard, best_a_move)
+           else BlackboardUpdate(l_tempboard, best_a_move);
+           MutiMinMax(l_tempboard, Not SideIsRed, depth - 1, -INF, INF, aithinkstep);
+           Result := True;
         end;
       end;
     end;
   end;
 
-  if (depth <= 0) or (a + b > 63) then
+begin
+  rScore := 0; bScore := 0;
+  Score(Aboard, rScore, bScore);
+  if rScore = 0 then
+  begin
+    if SideIsRed then Result := 2000 else Result := -2000;
+    exit;
+  end;
+  if bScore = 0 then
+  begin
+    if SideIsRed then Result := -2000 else Result := 2000;
+    exit;
+  end;
+
+  if (depth = 6) and FCudaEnabled then
+  begin
+    if DoGPUBatching then
+    begin
+      Result := l_bestvalue;
+      exit;
+    end;
+  end;
+
+  if (depth <= 0) or (rScore + bScore > 63) then
   begin
     Result := EvaluateScore(Aboard, SideIsRed);
     exit;
   end;
 
-  bestvalue := -INF;
-  if SideIsRed then FastMakeRedMove(Aboard, moves)
-  else FastMakeBlackMove(Aboard, moves);
+  l_bestvalue := -INF;
+  if SideIsRed then FastMakeRedMove(Aboard, l_moves)
+  else FastMakeBlackMove(Aboard, l_moves);
 
-  if moves.Count = 0 then
+  if l_moves.Count = 0 then
   begin
-    if SideIsRed then FastMakeBlackMove(Aboard, moves)
-    else FastMakeRedMove(Aboard, moves);
+    if SideIsRed then FastMakeBlackMove(Aboard, l_moves)
+    else FastMakeRedMove(Aboard, l_moves);
 
-    if moves.Count = 0 then
+    if l_moves.Count = 0 then
     begin
       Result := EvaluateScore(Aboard, SideIsRed);
       exit;
     end;
-    oldaithinkstep := aithinkstep;
+    l_oldaithinkstep := aithinkstep;
     aithinkstep.Moves[aithinkstep.Count] := -1; // PASS
     inc(aithinkstep.Count);
     Result := -MutiMinMax(Aboard, Not SideIsRed, depth, -beta, -alpha, aithinkstep);
     exit;
   end;
 
-  tempboard := Aboard;
-  oldaithinkstep := aithinkstep;
+  l_tempboard := Aboard;
+  l_oldaithinkstep := aithinkstep;
+  l_bestaithinkstep := aithinkstep;
 
-  if moves.Count > 1 then
+  if l_moves.Count > 1 then
   begin
-    // Fast move ordering for MutiMinMax
     if depth > 4 then
     begin
-      for a := 0 to moves.Count - 1 do
+      for i := 0 to l_moves.Count - 1 do
       begin
-        tempboard2 := Aboard;
-        if SideIsRed then RedboardUpdate(tempboard2, moves.Moves[a])
-        else BlackboardUpdate(tempboard2, moves.Moves[a]);
-        scores[a] := -EvaluateScore(tempboard2, not SideIsRed);
+        l_tempboard2 := Aboard;
+        if SideIsRed then RedboardUpdate(l_tempboard2, l_moves.Moves[i])
+        else BlackboardUpdate(l_tempboard2, l_moves.Moves[i]);
+        l_scores[i] := -EvaluateScore(l_tempboard2, not SideIsRed);
       end;
     end
     else
     begin
-      for a := 0 to moves.Count - 1 do
-        scores[a] := GetMoveHeuristic(moves.Moves[a], SideIsRed);
+      for i := 0 to l_moves.Count - 1 do
+        l_scores[i] := GetMoveHeuristic(l_moves.Moves[i], SideIsRed);
     end;
-    FastScoresort(moves, scores);
+    FastScoresort(l_moves, l_scores);
   end;
 
-  for a := 0 to moves.Count - 1 do
+  for i := 0 to l_moves.Count - 1 do
   begin
-    aithinkstep := oldaithinkstep;
-    aithinkstep.Moves[aithinkstep.Count] := moves.Moves[a];
+    aithinkstep := l_oldaithinkstep;
+    aithinkstep.Moves[aithinkstep.Count] := l_moves.Moves[i];
     inc(aithinkstep.Count);
 
-    Aboard := tempboard;
-    if SideIsRed then RedboardUpdate(Aboard, moves.Moves[a])
-    else BlackboardUpdate(Aboard, moves.Moves[a]);
+    Aboard := l_tempboard;
+    if SideIsRed then RedboardUpdate(Aboard, l_moves.Moves[i])
+    else BlackboardUpdate(Aboard, l_moves.Moves[i]);
 
-    value := -MutiMinMax(Aboard, Not SideIsRed, depth - 1, -beta, -alpha, aithinkstep);
+    l_value := -MutiMinMax(Aboard, Not SideIsRed, depth - 1, -beta, -alpha, aithinkstep);
 
-    if value > bestvalue then
+    if l_value > l_bestvalue then
     begin
-      bestvalue := value;
-      if value > alpha then alpha := value;
-      bestaithinkstep := aithinkstep;
+      l_bestvalue := l_value;
+      if l_value > alpha then alpha := l_value;
+      l_bestaithinkstep := aithinkstep;
     end;
     if alpha >= beta then break;
   end;
-  aithinkstep := bestaithinkstep;
-  Result := bestvalue;
+  aithinkstep := l_bestaithinkstep;
+  Result := l_bestvalue;
 end;
 
 procedure TForm1.FastMakeRedMove(const aBoard:Tboard; var temp:TMoveArray);
@@ -3594,6 +3602,8 @@ begin
 
   tempboard := Aboard;
   oldaithinkstep := aithinkstep;
+  bestaithinkstep := aithinkstep; // Initialize with current path
+
   for a := 0 to moves.Count - 1 do
   begin
     aithinkstep := oldaithinkstep;
@@ -3607,27 +3617,18 @@ begin
     value := -MinMax(Aboard, Not SideIsRed, depth - 1, -beta, -alpha, aithinkstep);
     if GetCurrentThreadID = MainThreadID then
       CallSyncUpdateAIUI('', '', IntToStr(value) + ':' + MoveArrayToThinkStep(aithinkstep), False, True);
+
     if value > bestvalue then
     begin
       bestvalue := value;
       if value > alpha then alpha := value;
-      SetLength(aithinksteplist, 1);
-      aithinksteplist[0] := aithinkstep;
-    end
-    else if value = bestvalue then
-    begin
-      SetLength(aithinksteplist, Length(aithinksteplist) + 1);
-      aithinksteplist[High(aithinksteplist)] := aithinkstep;
+      bestaithinkstep := aithinkstep;
     end;
 
     if alpha >= beta then break;
   end;
 
-  if Length(aithinksteplist) > 0 then
-  begin
-    a := Random(Length(aithinksteplist));
-    aithinkstep := aithinksteplist[a];
-  end;
+  aithinkstep := bestaithinkstep;
   Result := bestvalue;
 end;
 
