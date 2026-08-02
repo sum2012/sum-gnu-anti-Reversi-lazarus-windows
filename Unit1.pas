@@ -264,6 +264,7 @@ type
       function MutiMinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
       Procedure Scoresort(var scorelist:Tstringlist;var stepno:Tstringlist);
       procedure FastScoresort(var moves: TMoveArray; var scores: array of Integer);
+      function GetMoveHeuristic(move: Integer; SideIsRed: Boolean): Integer;
       function ThinkNumber(Aboard:Tboard;SideIsRed:Boolean;depth:integer):integer;
       function BoardtoFen:String;
       function MutiMinMax(Aboard:Tboard;const SideIsRed:Boolean;const depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
@@ -358,18 +359,32 @@ procedure TForm1.FastScoresort(var moves: TMoveArray; var scores: array of Integ
 var
   i, j, tempMove, tempScore: Integer;
 begin
-  for i := 0 to moves.Count - 2 do
-    for j := 0 to moves.Count - 2 - i do
-      if scores[j] < scores[j+1] then
-      begin
-        tempScore := scores[j];
-        scores[j] := scores[j+1];
-        scores[j+1] := tempScore;
+  for i := 1 to moves.Count - 1 do
+  begin
+    tempScore := scores[i];
+    tempMove := moves.Moves[i];
+    j := i - 1;
+    while (j >= 0) and (scores[j] < tempScore) do
+    begin
+      scores[j + 1] := scores[j];
+      moves.Moves[j + 1] := moves.Moves[j];
+      Dec(j);
+    end;
+    scores[j + 1] := tempScore;
+    moves.Moves[j + 1] := tempMove;
+  end;
+end;
 
-        tempMove := moves.Moves[j];
-        moves.Moves[j] := moves.Moves[j+1];
-        moves.Moves[j+1] := tempMove;
-      end;
+function TForm1.GetMoveHeuristic(move: Integer; SideIsRed: Boolean): Integer;
+var
+  r, c: Integer;
+begin
+  if move = -1 then Exit(0);
+  r := (move - 1) div 8 + 1;
+  c := (move - 1) mod 8 + 1;
+  // In Anti-Reversi, PosMark contains negative values for good squares (like corners)
+  // EvaluateScore uses PosMark for both sides, just negating the final result.
+  Result := PosMark[r, c];
 end;
 
 function MoveToThinkStep(move: Integer): string;
@@ -1436,16 +1451,26 @@ begin
 
   tempboard := Aboard;
   oldaithinkstep := aithinkstep;
-  for a := 0 to moves.Count - 1 do
+  if moves.Count > 1 then
   begin
-    Aboard := tempboard;
-    if SideIsRed then RedboardUpdate(Aboard, moves.Moves[a])
-    else BlackboardUpdate(Aboard, moves.Moves[a]);
-    current_path.Count := 0;
-    scores[a] := -MutiMinMax(Aboard, Not SideIsRed, depth - 2, -INF, INF, current_path);
+    if depth > 2 then
+    begin
+      for a := 0 to moves.Count - 1 do
+      begin
+        Aboard := tempboard;
+        if SideIsRed then RedboardUpdate(Aboard, moves.Moves[a])
+        else BlackboardUpdate(Aboard, moves.Moves[a]);
+        current_path.Count := 0;
+        scores[a] := -MutiMinMax(Aboard, Not SideIsRed, depth - 2, -INF, INF, current_path);
+      end;
+    end
+    else
+    begin
+      for a := 0 to moves.Count - 1 do
+        scores[a] := GetMoveHeuristic(moves.Moves[a], SideIsRed);
+    end;
+    FastScoresort(moves, scores);
   end;
-
-  FastScoresort(moves, scores);
 
   for a := 0 to moves.Count div 2 do
   begin
@@ -1660,13 +1685,21 @@ begin
 
   if moves.Count > 1 then
   begin
-    // Simple move ordering for MutiMinMax
-    for a := 0 to moves.Count - 1 do
+    // Fast move ordering for MutiMinMax
+    if depth > 4 then
     begin
-      tempboard2 := Aboard;
-      if SideIsRed then RedboardUpdate(tempboard2, moves.Moves[a])
-      else BlackboardUpdate(tempboard2, moves.Moves[a]);
-      scores[a] := -EvaluateScore(tempboard2, not SideIsRed);
+      for a := 0 to moves.Count - 1 do
+      begin
+        tempboard2 := Aboard;
+        if SideIsRed then RedboardUpdate(tempboard2, moves.Moves[a])
+        else BlackboardUpdate(tempboard2, moves.Moves[a]);
+        scores[a] := -EvaluateScore(tempboard2, not SideIsRed);
+      end;
+    end
+    else
+    begin
+      for a := 0 to moves.Count - 1 do
+        scores[a] := GetMoveHeuristic(moves.Moves[a], SideIsRed);
     end;
     FastScoresort(moves, scores);
   end;
@@ -3393,12 +3426,20 @@ begin
 
   if moves.Count > 1 then
   begin
-    for a := 0 to moves.Count - 1 do
+    if depth > 4 then
     begin
-      tempboard := Aboard;
-      if SideIsRed then RedboardUpdate(tempboard, moves.Moves[a])
-      else BlackboardUpdate(tempboard, moves.Moves[a]);
-      scores[a] := -EvaluateScore(tempboard, not SideIsRed);
+      for a := 0 to moves.Count - 1 do
+      begin
+        tempboard := Aboard;
+        if SideIsRed then RedboardUpdate(tempboard, moves.Moves[a])
+        else BlackboardUpdate(tempboard, moves.Moves[a]);
+        scores[a] := -EvaluateScore(tempboard, not SideIsRed);
+      end;
+    end
+    else
+    begin
+      for a := 0 to moves.Count - 1 do
+        scores[a] := GetMoveHeuristic(moves.Moves[a], SideIsRed);
     end;
     FastScoresort(moves, scores);
   end;
@@ -3588,13 +3629,21 @@ begin
 
   if moves.Count > 1 then
   begin
-    // Simple move ordering: sort moves based on a shallow search
-    for a := 0 to moves.Count - 1 do
+    // Fast move ordering: sort moves based on a weighted heuristic or shallow search
+    if depth > 4 then
     begin
-      tempboard := Aboard;
-      if SideIsRed then RedboardUpdate(tempboard, moves.Moves[a])
-      else BlackboardUpdate(tempboard, moves.Moves[a]);
-      scores[a] := -EvaluateScore(tempboard, not SideIsRed);
+      for a := 0 to moves.Count - 1 do
+      begin
+        tempboard := Aboard;
+        if SideIsRed then RedboardUpdate(tempboard, moves.Moves[a])
+        else BlackboardUpdate(tempboard, moves.Moves[a]);
+        scores[a] := -EvaluateScore(tempboard, not SideIsRed);
+      end;
+    end
+    else
+    begin
+      for a := 0 to moves.Count - 1 do
+        scores[a] := GetMoveHeuristic(moves.Moves[a], SideIsRed);
     end;
     FastScoresort(moves, scores);
   end;
@@ -3806,12 +3855,20 @@ begin
 
   if moves.Count > 1 then
   begin
-    for a := 0 to moves.Count - 1 do
+    if depth > 4 then
     begin
-      tempboard := Aboard;
-      if SideIsRed then RedboardUpdate(tempboard, moves.Moves[a])
-      else BlackboardUpdate(tempboard, moves.Moves[a]);
-      scores[a] := -EvaluateScore(tempboard, not SideIsRed);
+      for a := 0 to moves.Count - 1 do
+      begin
+        tempboard := Aboard;
+        if SideIsRed then RedboardUpdate(tempboard, moves.Moves[a])
+        else BlackboardUpdate(tempboard, moves.Moves[a]);
+        scores[a] := -EvaluateScore(tempboard, not SideIsRed);
+      end;
+    end
+    else
+    begin
+      for a := 0 to moves.Count - 1 do
+        scores[a] := GetMoveHeuristic(moves.Moves[a], SideIsRed);
     end;
     FastScoresort(moves, scores);
   end;
