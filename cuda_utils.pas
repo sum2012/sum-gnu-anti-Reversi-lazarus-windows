@@ -50,6 +50,9 @@ var
     hStream: Pointer; kernelParams: Pointer; extra: Pointer): CUresult; stdcall;
   cuCtxDestroy: function(ctx: CUcontext): CUresult; stdcall;
   cuCtxSetLimit: function(limit: CUlimit; value: NativeUInt): CUresult; stdcall;
+  cuCtxSetCurrent: function(ctx: CUcontext): CUresult; stdcall;
+  cuCtxPushCurrent: function(ctx: CUcontext): CUresult; stdcall;
+  cuCtxPopCurrent: function(var pctx: CUcontext): CUresult; stdcall;
 
 function InitCuda: Boolean;
 function LoadKernel(const PTXSource: string; const FuncName: string; var Module: CUmodule; var Func: CUfunction): Boolean;
@@ -84,6 +87,9 @@ begin
     @cuLaunchKernel := GetProcAddress(CudaLib, 'cuLaunchKernel');
     @cuCtxDestroy := GetProcAddress(CudaLib, 'cuCtxDestroy');
     @cuCtxSetLimit := GetProcAddress(CudaLib, 'cuCtxSetLimit');
+    @cuCtxSetCurrent := GetProcAddress(CudaLib, 'cuCtxSetCurrent');
+    @cuCtxPushCurrent := GetProcAddress(CudaLib, 'cuCtxPushCurrent');
+    @cuCtxPopCurrent := GetProcAddress(CudaLib, 'cuCtxPopCurrent');
 
     if Assigned(cuInit) then
     begin

@@ -44,8 +44,7 @@ type
     Moves: array[0..63] of Integer;
   end;
 
-
-type
+  TAIThread = class;
 
   { TForm1 }
 
@@ -271,9 +270,31 @@ type
       procedure BatchSearchOnGPU(const Boards: array of Tboard; const Depth: Integer; const SideIsRed: Boolean; const Color: Integer; var Scores: array of Integer);
       function DetectCudaVersion(var Version: Integer): Boolean;
       procedure ToggleCuda(Enabled: Boolean; ShowErrors: Boolean);
+    procedure HandleAIResult(const MoveName: string);
+    procedure SyncUpdateAIUI;
+    procedure CallSyncUpdateAIUI(const AScore, ATime, AThinkStep: string; AClear, AAppend: Boolean);
     { Private declarations }
-  public
+  private
+    FAIWasRed: Boolean;
+    FSyncScore, FSyncTime, FSyncThinkStep: string;
+    FSyncClearList, FSyncAppendList: Boolean;
+    FAIThread: TAIThread;
+    procedure StartAI(AComputerIsRed: Boolean);
     { Public declarations }
+  end;
+
+  TAIThread = class(TThread)
+  private
+    FForm: TForm1;
+    FBoard: Tboard;
+    FComputerIsRed: Boolean;
+    FResultMove: string;
+    FStartTime: QWord;
+  protected
+    procedure Execute; override;
+    procedure SyncNotifyDone;
+  public
+    constructor Create(AForm: TForm1; ABoard: Tboard; AComputerIsRed: Boolean);
   end;
 
 function MoveToThinkStep(move: Integer): string;
@@ -716,6 +737,90 @@ end;
 
 
 
+{ TAIThread }
+
+constructor TAIThread.Create(AForm: TForm1; ABoard: Tboard; AComputerIsRed: Boolean);
+begin
+  inherited Create(True);
+  FForm := AForm;
+  FBoard := ABoard;
+  FComputerIsRed := AComputerIsRed;
+  FreeOnTerminate := True;
+end;
+
+procedure TAIThread.Execute;
+begin
+  FForm.FAIWasRed := FComputerIsRed;
+  if FForm.FCudaEnabled and (FForm.FCudaContext <> nil) then
+    cuCtxSetCurrent(FForm.FCudaContext);
+
+  FStartTime := GetTickCount64;
+  FResultMove := FForm.AI(FBoard, FComputerIsRed);
+
+  if FForm.FCudaEnabled and (FForm.FCudaContext <> nil) then
+    cuCtxSetCurrent(nil); // Detach from thread
+
+  Synchronize(SyncNotifyDone);
+end;
+
+procedure TAIThread.SyncNotifyDone;
+begin
+  FForm.FAIThread := nil;
+  if not Terminated then
+    FForm.HandleAIResult(FResultMove);
+end;
+
+procedure TForm1.HandleAIResult(const MoveName: string);
+var
+  Img: TImage;
+begin
+  Img := TImage(FindComponent(MoveName));
+  if Img <> nil then
+  begin
+    if FAIWasRed then
+      RedChessClick(Img)
+    else
+      BlackChessClick(Img);
+  end;
+end;
+
+procedure TForm1.SyncUpdateAIUI;
+begin
+  if FSyncClearList then AiListBox.Clear;
+  if FSyncScore <> '' then AIDisplayScoreLabel.Caption := FSyncScore;
+  if FSyncTime <> '' then AIUsedTimeLabel.Caption := FSyncTime;
+  if FSyncThinkStep <> '' then
+  begin
+    ThinkstepEdit.Text := FSyncThinkStep;
+    if FSyncAppendList then AiListBox.Items.Add(FSyncThinkStep);
+  end;
+  FSyncClearList := False;
+  FSyncAppendList := False;
+  FSyncScore := '';
+  FSyncTime := '';
+  FSyncThinkStep := '';
+end;
+
+procedure TForm1.CallSyncUpdateAIUI(const AScore, ATime, AThinkStep: string; AClear, AAppend: Boolean);
+begin
+  FSyncScore := AScore;
+  FSyncTime := ATime;
+  FSyncThinkStep := AThinkStep;
+  FSyncClearList := AClear;
+  FSyncAppendList := AAppend;
+  if GetCurrentThreadID = MainThreadID then
+    SyncUpdateAIUI
+  else
+    TThread.Synchronize(nil, SyncUpdateAIUI);
+end;
+
+procedure TForm1.StartAI(AComputerIsRed: Boolean);
+begin
+  if FAIThread <> nil then Exit;
+  FAIThread := TAIThread.Create(Self, board, AComputerIsRed);
+  FAIThread.Start;
+end;
+
 procedure TForm1.FormCreate(Sender: TObject);
 var a,b,CudaVersion:integer;
 begin
@@ -783,7 +888,7 @@ begin
 //mutiscorelist := Tstringlist.Create;
 templist := Tstringlist.Create;
 templist2 := Tstringlist.Create;
-AiListBox.clear;
+CallSyncUpdateAIUI('', '', 'CPU Threads: ' + IntToStr(TParallel.MaxThreadCount), True, True);
 if ComputerisRed = False then
 begin
   OneDepthSideisRed:=False;
@@ -843,8 +948,7 @@ begin
   FGpuEvalCount := 0;
   move.Count := 0;
   bestscore := MutiMinMax(board, ComputerisRed, depth, -INF, INF, move);
-  AIDisplayScoreLabel.Caption:= inttostr(bestscore);
-  ThinkstepEdit.Text:= MoveArrayToThinkStep(move);
+  CallSyncUpdateAIUI(inttostr(bestscore), '', MoveArrayToThinkStep(move), False, False);
   // Sequential loop for CUDA to avoid multi-thread overhead and noise
   //for a := 0 to mutitemplist.count - 1 do
     //DoSomethingParallel(a);
@@ -859,7 +963,7 @@ scoresort(mutiscorelist,mutisteplist);
 If (cuted = false) or (fullthink = True) then
 begin
  for a:= 0 to mutiscorelist.count-1 do
-  AiListBox.items.add(mutiscorelist[a]+':'+mutisteplist[a]);
+  CallSyncUpdateAIUI('', '', mutiscorelist[a]+':'+mutisteplist[a], False, True);
  b:= mutiscorelist.count-1;
  for a:= b downto 1 do
  begin
@@ -870,7 +974,7 @@ begin
    end
  end;
  a:=Random(mutisteplist.Count);
- ThinkstepEdit.text := mutisteplist[a];
+ CallSyncUpdateAIUI('', '', mutisteplist[a], False, False);
  if copy(ThinkstepEdit.text, 1, 4) = 'PASS' then
    Result := ''
  else begin
@@ -878,7 +982,7 @@ begin
    c := strtoint(copy(ThinkstepEdit.text, 1, 1)); // Col
    Result := 'Image' + IntToStr(8*b + c - 8);
  end;
- AIDisplayScoreLabel.Caption:= mutiscorelist[0];
+ CallSyncUpdateAIUI(mutiscorelist[0], '', '', False, False);
 end
 else begin
   b:= mutisteplist.count div 2 +1;
@@ -905,8 +1009,8 @@ begin
   if FCudaEnabled then
   begin
      aibestmove.Count := 0;
-     AiListBox.clear;
-     ThinkstepEdit.Text:= '';
+     CallSyncUpdateAIUI('', '', '', True, False);
+     CallSyncUpdateAIUI('', '', '', False, False);
      FGpuEvalCount := 0;
      tempdepth:= strToint(Endgamedepth.text);
      score(board,a,b);
@@ -916,10 +1020,7 @@ begin
        tempdepth:= strToint(Nornaldepth.Text);
 
      a:=MutiMinMax(board, ComputerisRed, tempdepth, -INF, INF, aibestmove);
-     AIDisplayScoreLabel.Caption:= inttostr(a);
-     AiListBox.items.add(inttostr(a)+':'+MoveArrayToThinkStep(aibestmove));
-     ThinkstepEdit.Text:= MoveArrayToThinkStep(aibestmove);
-     ThinkstepEdit.Text:= AiListBox.items[0];
+     CallSyncUpdateAIUI(inttostr(a), '', inttostr(a)+':'+MoveArrayToThinkStep(aibestmove), False, True);
      if aibestmove.Count > 0 then
        Result := 'Image' + IntToStr(aibestmove.Moves[0]);
      exit;
@@ -1077,6 +1178,9 @@ begin
   res := cuLaunchKernel(FCudaSearchFunc, (num_boards + 255) div 256, 1, 1, 256, 1, 1, 0, nil, @kernel_params[0], nil);
   if res <> CUDA_SUCCESS then
   begin
+    system.EnterCriticalSection(MyCriticalSection);
+    FGpuEvalCount := -1000000;
+    system.LeaveCriticalSection(MyCriticalSection);
     for i := 0 to num_boards - 1 do
       Scores[i] := EvaluateScore(Boards[i], SideIsRed);
   end
@@ -1130,6 +1234,9 @@ begin
 
   if SideIsRed then ColorName := 'Red' else ColorName := 'Black';
 
+  if FCudaEnabled and (FCudaContext <> nil) then
+    cuCtxSetCurrent(FCudaContext);
+
   depth := StrToIntDef(NornalDepth.Text, 7);
   FGpuEvalCount := 0;
   aithinkstep.Count := 0;
@@ -1180,6 +1287,13 @@ var
   const_size: NativeUInt;
   res: CUresult;
 begin
+  if (FAIThread <> nil) and (not (csDestroying in ComponentState)) then
+  begin
+    if ShowErrors then ShowMessage('Cannot change CUDA settings while AI is thinking.');
+    CudaEnabledMenuItem.Checked := FCudaEnabled;
+    exit;
+  end;
+
   if Enabled then
   begin
     if not InitCuda then
@@ -1285,6 +1399,9 @@ begin
   end
   else
   begin
+    if FCudaContext <> nil then
+      cuCtxSetCurrent(FCudaContext);
+
     if FGpuBoardsBuf <> 0 then cuMemFree(FGpuBoardsBuf);
     if FGpuResultsBuf <> 0 then cuMemFree(FGpuResultsBuf);
     if FGpuTransposedBuf <> 0 then cuMemFree(FGpuTransposedBuf);
@@ -1825,7 +1942,7 @@ procedure TForm1.RedChessClick(Sender: TObject);
 var a,b,c:integer;templist:tstringlist;
     targetImg: TImage;
 begin
-  if Sender = nil then exit;
+  if (Sender = nil) or (FAIThread <> nil) then exit;
   // clean the t
   For a:= 0 to Redlist.Count-1 do
   begin
@@ -1930,9 +2047,7 @@ begin
     Updateboard;
     if (HumanVsComputer.Checked = true) and (FirstIsRed = true) or (ComputerVsHuman.Checked = true) and (FirstIsRed = false) then
     begin
-      Sleep(2000);
-      BlackChessclick(Timage(FindComponent(AI(board,False))));
-//      Updateboard; AiMoveList
+      StartAI(False);
     end;
   end
   else
@@ -1972,10 +2087,7 @@ begin
 //        if ComputerVsHuman.Checked = true then
         if (ComputerVsHuman.Checked = true) and (FirstIsRed = true) then
         begin
-          Sleep(2000);
-//        RedChessclick(Timage(FindComponent(templist[0])));
-          RedChessclick(Timage(FindComponent(AI(board,True))));
-//          Updateboard;
+          StartAI(True);
         end;
       end
       else begin
@@ -2054,6 +2166,11 @@ end;
 
 procedure TForm1.FormDestroy(Sender: TObject);
 begin
+  if FAIThread <> nil then
+  begin
+    FAIThread.Terminate;
+    FAIThread.WaitFor;
+  end;
   if FCudaContext <> nil then
     cuCtxDestroy(FCudaContext);
  // 唔用就釋放番
@@ -2342,7 +2459,7 @@ procedure TForm1.BlackChessClick(Sender: TObject);
 var a,b,c:integer;templist:Tstringlist;
     targetImg: TImage;
 begin
-  if Sender = nil then exit;
+  if (Sender = nil) or (FAIThread <> nil) then exit;
   // clean the made move
   For a:= 0 to Blacklist.Count-1 do
   begin
@@ -2446,10 +2563,7 @@ begin
 //    if ComputerVsHuman.Checked = true then
     if (HumanVsComputer.Checked = true) and (FirstIsRed = false) or (ComputerVsHuman.Checked = True) and (FirstIsRed = true) then
     begin
-      Sleep(2000);
-//      RedChessclick(Timage(FindComponent(templist[0])));
-      RedChessclick(Timage(FindComponent(AI(board,true))));
- //     Updateboard;
+      StartAI(true);
     end;
   end
   else begin
@@ -2487,8 +2601,7 @@ begin
 
     if (HumanVsComputer.Checked = true) and (FirstIsRed = true) or (HumanVsHuman.Checked = false) and (HumanVsComputer.Checked = false) and (FirstIsRed = true) then
         begin
-          Sleep(2000);
-          BlackChessclick(Timage(FindComponent(AI(board,False))));
+          StartAI(False);
         end;
       end
       else begin
@@ -2682,8 +2795,7 @@ begin
       Score(Board,b,c);
       if b+c > 3 then
       begin
-        RedChessclick(Timage(FindComponent(AI(board,True))));
-        Updateboard;
+        StartAI(True);
       end
       else begin
     Image28.OnClick := nil;
@@ -2736,8 +2848,7 @@ begin
       Score(Board,b,c);
       if b+c > 4 then
       begin
-      BlackChessclick(Timage(FindComponent(AI(board,false))));
-      Updateboard;
+        StartAI(false);
       end
       else begin
     Image28.OnClick := nil;
@@ -2802,8 +2913,7 @@ begin
       Score(Board,b,c);
       if b+c > 4 then
       begin
-      BlackChessclick(Timage(FindComponent(AI(board,False))));
-      Updateboard;
+        StartAI(False);
       end
       else begin
     Image28.OnClick := nil;
@@ -3286,6 +3396,12 @@ procedure TForm1.ClearButtonClick(Sender: TObject);
 var a,b:integer;
     targetImg: TImage;
 begin
+  if FAIThread <> nil then
+  begin
+    FAIThread.Terminate;
+    FAIThread.WaitFor;
+    FAIThread := nil;
+  end;
    for a:=1 to 8 do
     begin
       for b:=1 to 8 do
@@ -3303,6 +3419,12 @@ end;
 procedure TForm1.BackButtonClick(Sender: TObject);
 var a,b,c:integer;templist:Tstringlist;
 begin
+  if FAIThread <> nil then
+  begin
+    FAIThread.Terminate;
+    FAIThread.WaitFor;
+    FAIThread := nil;
+  end;
  templist:= Tstringlist.Create;
   While true do
   begin
@@ -3464,9 +3586,8 @@ begin
     else BlackboardUpdate(Aboard, moves.Moves[a]);
 
     value := -MinMax(Aboard, Not SideIsRed, depth - 1, -beta, -alpha, aithinkstep);
-
-    AiListBox.items.Add(IntToStr(value) + ':' + MoveArrayToThinkStep(aithinkstep));
-
+    if GetCurrentThreadID = MainThreadID then
+      CallSyncUpdateAIUI('', '', IntToStr(value) + ':' + MoveArrayToThinkStep(aithinkstep), False, True);
     if value > bestvalue then
     begin
       bestvalue := value;
@@ -3686,13 +3807,13 @@ function TForm1.AI(Aboard:Tboard;ComputerIsRed:Boolean):string;
 var a,b,c:integer; thinkstep: TMoveArray; t1: QWord;
 begin
   t1 := GetTickCount64;
-  AiListBox.Clear;
+  CallSyncUpdateAIUI('', '', '', True, False);
   thinkstep.Count := 0;
   Score(board,a,b);
   if (a+b < 64) and (TParallel.MaxThreadCount > 1) then
   begin
     Result:=muti(ComputerIsRed);
-    AIUsedTimeLabel.Caption := 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's';
+    CallSyncUpdateAIUI('', 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's', '', False, False);
     exit;
   end;
 // http://blog.csdn.net/nowcan/archive/2004/10/19/142994.aspx
@@ -3730,14 +3851,12 @@ begin
            thinkstep.Count := 0;
            a:= MutiMinMax(Aboard, ComputerIsRed, Realdepth, -INF, INF, thinkstep);
            aimovelist := MoveArrayToThinkStep(thinkstep);
-           AIDisplayScoreLabel.caption:=intTostr(a);
+           CallSyncUpdateAIUI(intTostr(a), '', aimovelist, False, True);
            redlist.Clear;
            blacklist.Clear;
            Result:='Image'+ inttostr(thinkstep.Moves[0]);
-           aimovelist := AIDisplayScoreLabel.caption + ':'+ aimovelist;
-           AiListBox.Items.Add(aimovelist);
-           ThinkstepEdit.text:=aimovelist;
-           AIUsedTimeLabel.Caption := 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's';
+           aimovelist := intTostr(a) + ':'+ aimovelist;
+           CallSyncUpdateAIUI('', 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's', aimovelist, False, False);
            exit;
        end
        else begin
@@ -3747,14 +3866,12 @@ begin
                thinkstep.Count := 0;
                a:= MutiMinMax(Aboard, ComputerIsRed, Realdepth, -INF, INF, thinkstep);
                aimovelist := MoveArrayToThinkStep(thinkstep);
-               AIDisplayScoreLabel.caption:=intTostr(a);
+               CallSyncUpdateAIUI(intTostr(a), '', aimovelist, False, True);
                redlist.Clear;
                blacklist.Clear;
                Result:='Image'+ inttostr(thinkstep.Moves[0]);
-               aimovelist := AIDisplayScoreLabel.caption + ':'+ aimovelist;
-               AiListBox.Items.Add(aimovelist);
-               ThinkstepEdit.text:=aimovelist;
-               AIUsedTimeLabel.Caption := 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's';
+               aimovelist := intTostr(a) + ':'+ aimovelist;
+               CallSyncUpdateAIUI('', 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's', aimovelist, False, False);
                exit;
          end
          else
@@ -3766,13 +3883,12 @@ begin
     a:=minMaxRandom(Aboard,ComputerIsRed,Realdepth, -INF, INF, thinkstep);
   redlist.Clear;
   blacklist.Clear;
-  ThinkstepEdit.text:=MoveArrayToThinkStep(thinkstep);
-  AIDisplayScoreLabel.caption:=intTostr(A);
+  CallSyncUpdateAIUI(intTostr(A), '', MoveArrayToThinkStep(thinkstep), False, False);
 
 
   a:=strtoint(trim(copy(aimovelist,1,2)));
   Result:='image'+ inttostr(a) ;
-  AIUsedTimeLabel.Caption := 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's';
+  CallSyncUpdateAIUI('', 'Time: ' + FloatToStrF((GetTickCount64 - t1) / 1000, ffFixed, 8, 2) + 's', '', False, False);
 end;
 
 Procedure Tform1.Scoresort(var scorelist:Tstringlist;var stepno:Tstringlist);
@@ -3884,9 +4000,8 @@ begin
     current_path.Count := 1;
 
     value := -MinMax(tempboard, Not SideIsRed, depth - 1, -beta, -alpha, current_path);
-
-    AiListBox.items.Add(MoveToThinkStep(moves.Moves[a]) + ' ' + IntToStr(value));
-
+    if GetCurrentThreadID = MainThreadID then
+      CallSyncUpdateAIUI('', '', MoveToThinkStep(moves.Moves[a]) + ' ' + IntToStr(value), False, True);
     if value > bestvalue then
     begin
       bestvalue := value;
