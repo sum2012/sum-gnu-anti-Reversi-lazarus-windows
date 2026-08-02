@@ -13001,7 +13001,7 @@ object Form1: TForm1
     OnClick = ClearButtonClick
   end
   object MoveFirstRadioGroup: TRadioGroup
-    Left = 12
+    Left = 16
     Height = 158
     Top = 351
     Width = 146

@@ -33,7 +33,11 @@ const
 
 
 type
-  Tboard=array[0..9,0..9] of integer;
+  Tboard = record
+    Red: UInt64;
+    Black: UInt64;
+  end;
+  TArrayBoard = array[0..9, 0..9] of Integer;
   Tmovelist = array[1..20] of integer;
   TMoveArray = record
     Count: Integer;
@@ -323,7 +327,7 @@ var
 }
 // 1 red ; -1 black ; 0 space
 // eat chess-> new board->produce eat step -> eat chess...
-    PosMark:Tboard = (
+    PosMark:TArrayBoard = (
     (0,0,0,0,0,0,0,0,0,0),
       (0,-199,3,-1,-1,-1,-1,3,-199,0),
       (0,3,-1,-1,-1,-1,-1,-1,3,0),
@@ -336,7 +340,7 @@ var
     (0,0,0,0,0,0,0,0,0,0)
       );
 {
-     BlackPosMark:Tboard = (
+     BlackPosMark:TArrayBoard = (
      (0,0,0,0,0,0,0,0,0,0),
       (0,200,2,-1,-1,-1,-1,2,200,0),
       (0,2,-1,-1,-1,-1,-1,-1,2,0),
@@ -396,6 +400,201 @@ begin
     if i > 0 then Result := Result + '->';
     Result := Result + MoveToThinkStep(moves.Moves[i]);
   end;
+end;
+
+function PopCount(N: UInt64): Integer;
+begin
+  Result := 0;
+  while N <> 0 do
+  begin
+    N := N and (N - 1);
+    inc(Result);
+  end;
+end;
+
+function GetBoardPiece(const AB: Tboard; Row, Col: Integer): Integer;
+var bit: Integer;
+begin
+  if (Row < 1) or (Row > 8) or (Col < 1) or (Col > 8) then exit(0);
+  bit := (Row - 1) * 8 + (Col - 1);
+  if (AB.Red and (UInt64(1) shl bit)) <> 0 then Result := 1
+  else if (AB.Black and (UInt64(1) shl bit)) <> 0 then Result := -1
+  else Result := 0;
+end;
+
+procedure SetBoardPiece(var AB: Tboard; Row, Col: Integer; Val: Integer);
+var bit: Integer; mask: UInt64;
+begin
+  if (Row < 1) or (Row > 8) or (Col < 1) or (Col > 8) then exit;
+  bit := (Row - 1) * 8 + (Col - 1);
+  mask := UInt64(1) shl bit;
+  AB.Red := AB.Red and (not mask);
+  AB.Black := AB.Black and (not mask);
+  if Val = 1 then AB.Red := AB.Red or mask
+  else if Val = -1 then AB.Black := AB.Black or mask;
+end;
+
+function GetBoardMoves(Own, Opp: UInt64): UInt64;
+var
+  empty, t: UInt64;
+begin
+  empty := not (Own or Opp);
+  Result := 0;
+
+  // Right
+  t := (Own shl 1) and Opp and $FEFEFEFEFEFEFEFE;
+  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
+  Result := Result or ((t shl 1) and empty and $FEFEFEFEFEFEFEFE);
+
+  // Left
+  t := (Own shr 1) and Opp and $7F7F7F7F7F7F7F7F;
+  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
+  Result := Result or ((t shr 1) and empty and $7F7F7F7F7F7F7F7F);
+
+  // Down
+  t := (Own shl 8) and Opp;
+  t := t or ((t shl 8) and Opp);
+  t := t or ((t shl 8) and Opp);
+  t := t or ((t shl 8) and Opp);
+  t := t or ((t shl 8) and Opp);
+  t := t or ((t shl 8) and Opp);
+  Result := Result or ((t shl 8) and empty);
+
+  // Up
+  t := (Own shr 8) and Opp;
+  t := t or ((t shr 8) and Opp);
+  t := t or ((t shr 8) and Opp);
+  t := t or ((t shr 8) and Opp);
+  t := t or ((t shr 8) and Opp);
+  t := t or ((t shr 8) and Opp);
+  Result := Result or ((t shr 8) and empty);
+
+  // Down-Right
+  t := (Own shl 9) and Opp and $FEFEFEFEFEFEFEFE;
+  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
+  Result := Result or ((t shl 9) and empty and $FEFEFEFEFEFEFEFE);
+
+  // Down-Left
+  t := (Own shl 7) and Opp and $7F7F7F7F7F7F7F7F;
+  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
+  Result := Result or ((t shl 7) and empty and $7F7F7F7F7F7F7F7F);
+
+  // Up-Right
+  t := (Own shr 7) and Opp and $FEFEFEFEFEFEFEFE;
+  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
+  Result := Result or ((t shr 7) and empty and $FEFEFEFEFEFEFEFE);
+
+  // Up-Left
+  t := (Own shr 9) and Opp and $7F7F7F7F7F7F7F7F;
+  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
+  Result := Result or ((t shr 9) and empty and $7F7F7F7F7F7F7F7F);
+end;
+
+procedure ApplyBoardMove(var Own, Opp: UInt64; Move: UInt64);
+var
+  flipped, t: UInt64;
+begin
+  flipped := 0;
+  Own := Own or Move;
+
+  // Right
+  t := (Move shl 1) and Opp and $FEFEFEFEFEFEFEFE;
+  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
+  if ((t shl 1) and Own and $FEFEFEFEFEFEFEFE) <> 0 then flipped := flipped or t;
+
+  // Left
+  t := (Move shr 1) and Opp and $7F7F7F7F7F7F7F7F;
+  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
+  if ((t shr 1) and Own and $7F7F7F7F7F7F7F7F) <> 0 then flipped := flipped or t;
+
+  // Down
+  t := (Move shl 8) and Opp;
+  t := t or ((t shl 8) and Opp);
+  t := t or ((t shl 8) and Opp);
+  t := t or ((t shl 8) and Opp);
+  t := t or ((t shl 8) and Opp);
+  t := t or ((t shl 8) and Opp);
+  if ((t shl 8) and Own) <> 0 then flipped := flipped or t;
+
+  // Up
+  t := (Move shr 8) and Opp;
+  t := t or ((t shr 8) and Opp);
+  t := t or ((t shr 8) and Opp);
+  t := t or ((t shr 8) and Opp);
+  t := t or ((t shr 8) and Opp);
+  t := t or ((t shr 8) and Opp);
+  if ((t shr 8) and Own) <> 0 then flipped := flipped or t;
+
+  // Down-Right
+  t := (Move shl 9) and Opp and $FEFEFEFEFEFEFEFE;
+  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
+  if ((t shl 9) and Own and $FEFEFEFEFEFEFEFE) <> 0 then flipped := flipped or t;
+
+  // Down-Left
+  t := (Move shl 7) and Opp and $7F7F7F7F7F7F7F7F;
+  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
+  if ((t shl 7) and Own and $7F7F7F7F7F7F7F7F) <> 0 then flipped := flipped or t;
+
+  // Up-Right
+  t := (Move shr 7) and Opp and $FEFEFEFEFEFEFEFE;
+  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
+  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
+  if ((t shr 7) and Own and $FEFEFEFEFEFEFEFE) <> 0 then flipped := flipped or t;
+
+  // Up-Left
+  t := (Move shr 9) and Opp and $7F7F7F7F7F7F7F7F;
+  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
+  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
+  if ((t shr 9) and Own and $7F7F7F7F7F7F7F7F) <> 0 then flipped := flipped or t;
+
+  Own := Own or flipped;
+  Opp := Opp and (not flipped);
 end;
 
 type
@@ -534,9 +733,8 @@ begin
  randomize;
   StopThink:=False;
 //  RedMove:=True;
-  for a:= 0 to 9 do
-    for b:= 0 to 9 do
-      Initboard[a][b]:=0;
+  Initboard.Red := 0;
+  Initboard.Black := 0;
 
   board:=Initboard;
   FirstIsRed:=True;
@@ -662,8 +860,14 @@ begin
    end
  end;
  a:=Random(mutisteplist.Count);
- Result:='image'+ inttostr(8*strtoint(copy(mutisteplist[a],3,1))+strtoint(copy(mutisteplist[a],1,1))-8);
- ThinkstepEdit.text := AiListBox.items[a];
+ ThinkstepEdit.text := mutisteplist[a];
+ if copy(ThinkstepEdit.text, 1, 4) = 'PASS' then
+   Result := ''
+ else begin
+   b := strtoint(copy(ThinkstepEdit.text, 3, 1)); // Row
+   c := strtoint(copy(ThinkstepEdit.text, 1, 1)); // Col
+   Result := 'Image' + IntToStr(8*b + c - 8);
+ end;
  AIDisplayScoreLabel.Caption:= mutiscorelist[0];
 end
 else begin
@@ -708,7 +912,7 @@ begin
      ThinkstepEdit.Text:= MoveArrayToThinkStep(aibestmove);
      ThinkstepEdit.Text:= AiListBox.items[0];
      if aibestmove.Count > 0 then
-       Result := 'image' + IntToStr(aibestmove.Moves[0]);
+       Result := 'Image' + IntToStr(aibestmove.Moves[0]);
      exit;
   end;
 //  mutisteplist := Tstringlist.Create;
@@ -754,8 +958,8 @@ end;
 
 procedure TForm1.BatchEvaluateOnGPU(const Boards: array of Tboard; const SideIsRed: Boolean; var Scores: array of Integer);
 var
-  num_boards, i, pos: Integer;
-  h_results, h_transposed: array of Integer;
+  num_boards, i: Integer;
+  h_results: array of Integer;
   side_val: Integer;
   kernel_params: array[0..3] of Pointer;
   res: CUresult;
@@ -765,28 +969,22 @@ begin
   if (FCudaFunc = nil) or (num_boards = 0) then exit;
 
   SetLength(h_results, num_boards);
-  SetLength(h_transposed, num_boards * 100);
   if SideIsRed then side_val := 1 else side_val := 0;
 
-  // Transpose board data for coalesced access: [pos * num_boards + idx]
-  for i := 0 to num_boards - 1 do
-    for pos := 0 to 99 do
-       h_transposed[pos * num_boards + i] := Boards[i][pos div 10, pos mod 10];
-
-  if (FGpuTransposedBuf <> 0) and (num_boards * 100 * SizeOf(Integer) <= FGpuBufSize) then
+  if (FGpuBoardsBuf <> 0) and (num_boards * SizeOf(Tboard) <= FGpuBufSize) then
   begin
-    boards_ptr := FGpuTransposedBuf;
+    boards_ptr := FGpuBoardsBuf;
     results_ptr := FGpuResultsBuf;
   end
   else
   begin
-    res := cuMemAlloc(boards_ptr, num_boards * 100 * SizeOf(Integer));
+    res := cuMemAlloc(boards_ptr, num_boards * SizeOf(Tboard));
     if res <> CUDA_SUCCESS then exit;
     res := cuMemAlloc(results_ptr, num_boards * SizeOf(Integer));
     if res <> CUDA_SUCCESS then begin cuMemFree(boards_ptr); exit; end;
   end;
 
-  cuMemcpyHtoD(boards_ptr, @h_transposed[0], num_boards * 100 * SizeOf(Integer));
+  cuMemcpyHtoD(boards_ptr, @Boards[0], num_boards * SizeOf(Tboard));
 
   kernel_params[0] := @boards_ptr;
   kernel_params[1] := @results_ptr;
@@ -819,7 +1017,7 @@ begin
     system.LeaveCriticalSection(MyCriticalSection);
   end;
 
-  if boards_ptr <> FGpuTransposedBuf then
+  if boards_ptr <> FGpuBoardsBuf then
   begin
     cuMemFree(boards_ptr);
     cuMemFree(results_ptr);
@@ -828,8 +1026,8 @@ end;
 
 procedure TForm1.BatchSearchOnGPU(const Boards: array of Tboard; const Depth: Integer; const SideIsRed: Boolean; const Color: Integer; var Scores: array of Integer);
 var
-  num_boards, i, pos: Integer;
-  h_results, h_transposed: array of Integer;
+  num_boards, i: Integer;
+  h_results: array of Integer;
   side_val: Integer;
   kernel_params: array[0..5] of Pointer;
   res: CUresult;
@@ -843,27 +1041,22 @@ begin
   end;
 
   SetLength(h_results, num_boards);
-  SetLength(h_transposed, num_boards * 100);
   if SideIsRed then side_val := 1 else side_val := 0;
 
-  for i := 0 to num_boards - 1 do
-    for pos := 0 to 99 do
-       h_transposed[pos * num_boards + i] := Boards[i][pos div 10, pos mod 10];
-
-  if (FGpuTransposedBuf <> 0) and (num_boards * 100 * SizeOf(Integer) <= FGpuBufSize) then
+  if (FGpuBoardsBuf <> 0) and (num_boards * SizeOf(Tboard) <= FGpuBufSize) then
   begin
-    boards_ptr := FGpuTransposedBuf;
+    boards_ptr := FGpuBoardsBuf;
     results_ptr := FGpuResultsBuf;
   end
   else
   begin
-    res := cuMemAlloc(boards_ptr, num_boards * 100 * SizeOf(Integer));
+    res := cuMemAlloc(boards_ptr, num_boards * SizeOf(Tboard));
     if res <> CUDA_SUCCESS then exit;
     res := cuMemAlloc(results_ptr, num_boards * SizeOf(Integer));
     if res <> CUDA_SUCCESS then begin cuMemFree(boards_ptr); exit; end;
   end;
 
-  cuMemcpyHtoD(boards_ptr, @h_transposed[0], num_boards * 100 * SizeOf(Integer));
+  cuMemcpyHtoD(boards_ptr, @Boards[0], num_boards * SizeOf(Tboard));
 
   kernel_params[0] := @boards_ptr;
   kernel_params[1] := @results_ptr;
@@ -896,7 +1089,7 @@ begin
     system.LeaveCriticalSection(MyCriticalSection);
   end;
 
-  if boards_ptr <> FGpuTransposedBuf then
+  if boards_ptr <> FGpuBoardsBuf then
   begin
     cuMemFree(boards_ptr);
     cuMemFree(results_ptr);
@@ -1334,8 +1527,8 @@ begin
     exit;
   end;
 
-  // x250 Turbo Boost: Unified Subtree Batching at Depth 3+
-  if (depth >= 3) and FCudaEnabled and (not StopThink) then
+  // Unified Subtree Batching at Depth 6 (GPU Boost)
+  if (depth = 6) and FCudaEnabled and (not StopThink) then
   begin
     if SideIsRed then FastMakeRedMove(Aboard, moves)
     else FastMakeBlackMove(Aboard, moves);
@@ -1392,111 +1585,49 @@ begin
       if Length(batch_boards) > 0 then
       begin
         SetLength(batch_scores, Length(batch_boards));
-        if depth = 3 then
-          BatchEvaluateOnGPU(batch_boards, Not SideIsRed, batch_scores)
-        else
-        begin
-          c := -1; if SideIsRed then c := 1;
-          BatchSearchOnGPU(batch_boards, depth - 3, Not SideIsRed, -c, batch_scores);
-        end;
+        BatchEvaluateOnGPU(batch_boards, SideIsRed, batch_scores);
 
         SetLength(a_best, moves.Count);
-        SetLength(a_best_b, moves.Count);
-        SetLength(a_best_c, moves.Count);
-        for a := 0 to moves.Count - 1 do
-        begin
-          a_best[a] := INF; // Minimizer (b) level
-          a_best_b[a] := -1;
-          a_best_c[a] := -1;
-        end;
+        for a := 0 to moves.Count - 1 do a_best[a] := INF;
 
         for i := 0 to branch_count - 1 do
         begin
            node_val := -INF;
-           temp_best_c := -1;
            for c := 0 to branch_info[i].count - 1 do
-           begin
-              // Level 3 is opponent's turn. We maximize Black's score at Level 2.
-              // batch_scores[idx] is from opponent's perspective (Red).
-              // So -batch_scores is Black's perspective.
-              if -batch_scores[branch_info[i].start_idx + c] > node_val then
-              begin
-                 node_val := -batch_scores[branch_info[i].start_idx + c];
-                 temp_best_c := branch_info[i].moves_c[c];
-              end;
-           end;
+              if batch_scores[branch_info[i].start_idx + c] > node_val then
+                 node_val := batch_scores[branch_info[i].start_idx + c];
 
-           // Level 1 is Red's turn. Red minimizes Black's score.
            if node_val < a_best[branch_info[i].a_idx] then
-           begin
               a_best[branch_info[i].a_idx] := node_val;
-              a_best_b[branch_info[i].a_idx] := branch_info[i].b_move;
-              a_best_c[branch_info[i].a_idx] := temp_best_c;
-           end;
         end;
 
         bestvalue := -INF;
         best_a_move := -1;
-        best_b_move := -1;
-        best_c_move := -1;
-
         for a := 0 to moves.Count - 1 do
         begin
-          if a_best[a] = INF then
-          begin
-             // Fallback: evaluate the board AFTER the move, not the root board
-             tempboard := Aboard;
-             if SideIsRed then RedboardUpdate(tempboard, moves.Moves[a])
-             else BlackboardUpdate(tempboard, moves.Moves[a]);
-             // EvaluateScore returns score for the root side (SideIsRed).
-             a_best[a] := EvaluateScore(tempboard, SideIsRed);
-          end;
-
-          // Root is Black. Black maximizes his score.
+          if a_best[a] = INF then a_best[a] := EvaluateScore(Aboard, SideIsRed);
           if a_best[a] > bestvalue then
           begin
             bestvalue := a_best[a];
             best_a_move := moves.Moves[a];
-            best_b_move := a_best_b[a];
-            best_c_move := a_best_c[a];
           end;
         end;
 
         if best_a_move >= 0 then
         begin
-          bestaithinkstep := oldaithinkstep;
-          bestaithinkstep.Moves[bestaithinkstep.Count] := best_a_move;
-          inc(bestaithinkstep.Count);
-          tempboard := Aboard;
-          if SideIsRed then RedboardUpdate(tempboard, best_a_move)
-          else BlackboardUpdate(tempboard, best_a_move);
+           aithinkstep := oldaithinkstep;
+           aithinkstep.Moves[aithinkstep.Count] := best_a_move;
+           inc(aithinkstep.Count);
 
-          // Step 2
-          if best_b_move >= 0 then
-          begin
-            bestaithinkstep.Moves[bestaithinkstep.Count] := best_b_move;
-            inc(bestaithinkstep.Count);
-            if (not SideIsRed) then RedboardUpdate(tempboard, best_b_move)
-            else BlackboardUpdate(tempboard, best_b_move);
+           // Path Recovery: Continue searching below the GPU batching level
+           tempboard := Aboard;
+           if SideIsRed then RedboardUpdate(tempboard, best_a_move)
+           else BlackboardUpdate(tempboard, best_a_move);
+           MutiMinMax(tempboard, Not SideIsRed, depth - 1, -INF, INF, aithinkstep);
 
-            // Step 3
-            if best_c_move >= 0 then
-            begin
-              bestaithinkstep.Moves[bestaithinkstep.Count] := best_c_move;
-              inc(bestaithinkstep.Count);
-              if SideIsRed then RedboardUpdate(tempboard, best_c_move)
-              else BlackboardUpdate(tempboard, best_c_move);
-
-              // Step 4+ (Path Recovery)
-              if (depth > 3) and (not StopThink) then
-                MutiMinMax(tempboard, Not SideIsRed, depth - 3, -INF, INF, bestaithinkstep);
-            end;
-          end;
+           Result := bestvalue;
+           exit;
         end;
-
-        aithinkstep := bestaithinkstep;
-        Result := bestvalue;
-        exit;
       end;
     end;
   end;
@@ -1569,678 +1700,69 @@ begin
 end;
 
 procedure TForm1.FastMakeRedMove(const aBoard:Tboard; var temp:TMoveArray);
-label lbl_next_red;
-var a,b,c,d:integer;
+var
+  moves: UInt64;
+  bit: Integer;
 begin
   temp.Count := 0;
-  for b:=1 to 8 do
-    for c:=1 to 8 do
+  moves := GetBoardMoves(aBoard.Red, aBoard.Black);
+  for bit := 0 to 63 do
+  begin
+    if (moves and (UInt64(1) shl bit)) <> 0 then
     begin
-      if aBoard[b,c] <> 0 then continue;
-
-      // left to right
-      if (c < 7) and (aBoard[b][c+1] = -1) then
-      begin
-        for d:=2 to 7 do
-        begin
-          if c+d < 9 then
-          begin
-            if aBoard[b][c+d] = 1 then
-            begin
-              temp.Moves[temp.Count] := 8*c+b-8;
-              inc(temp.Count);
-              goto lbl_next_red;
-            end
-            else if aBoard[b][c+d] <> -1 then break;
-          end;
-        end;
-      end;
-
-      if c > 2 then // right to left
-      begin
-        if aBoard[b][c-1] = -1 then
-        begin
-          for d:=2 to 7 do
-          begin
-            if c-d > 0 then
-            begin
-              if aBoard[b][c-d] = 1 then
-              begin
-                temp.Moves[temp.Count] := 8*c+b-8;
-                inc(temp.Count);
-                goto lbl_next_red;
-              end
-              else if aBoard[b][c-d] <> -1 then break;
-            end;
-          end;
-        end;
-      end;
-
-      if b < 7 then // top to bottom
-      begin
-        if aBoard[b+1][c] = -1 then
-        begin
-          for d:= 2 to 7 do
-          begin
-            if b+d < 9 then
-            begin
-              if aBoard[b+d][c] = 1 then
-              begin
-                temp.Moves[temp.Count] := 8*c+b-8;
-                inc(temp.Count);
-                goto lbl_next_red;
-              end
-              else if aBoard[b+d][c] <> -1 then break;
-            end;
-          end;
-        end;
-      end;
-
-      if b > 2 then // bottom to top
-      begin
-        if aBoard[b-1][c] = -1 then
-        begin
-          for d := 2 to 7 do
-          begin
-            if b - d > 0 then
-            begin
-              if aBoard[b-d][c] = 1 then
-              begin
-                temp.Moves[temp.Count] := 8*c+b-8;
-                inc(temp.Count);
-                goto lbl_next_red;
-              end
-              else if aBoard[b-d][c] <> -1 then break;
-            end;
-          end;
-        end;
-      end;
-
-      if (b > 2) and (c > 2) then // top left
-      begin
-        if aBoard[b-1][c-1] = -1 then
-        begin
-          for d := 2 to 7 do
-          begin
-            if (b - d > 0) and (c - d > 0) then
-            begin
-              if aBoard[b-d][c-d] = 1 then
-              begin
-                temp.Moves[temp.Count] := 8*c+b-8;
-                inc(temp.Count);
-                goto lbl_next_red;
-              end
-              else if aBoard[b-d][c-d] <> -1 then break;
-            end;
-          end;
-        end;
-      end;
-
-      if (b < 7) and (c < 7) then // bottom right
-      begin
-        if aBoard[b+1][c+1] = -1 then
-        begin
-          for d := 2 to 7 do
-          begin
-            if (b + d < 9) and (c + d < 9) then
-            begin
-              if aBoard[b+d][c+d] = 1 then
-              begin
-                temp.Moves[temp.Count] := 8*c+b-8;
-                inc(temp.Count);
-                goto lbl_next_red;
-              end
-              else if aBoard[b+d][c+d] <> -1 then break;
-            end;
-          end;
-        end;
-      end;
-
-      if (b > 2) and (c < 7) then // top right
-      begin
-        if aBoard[b-1][c+1] = -1 then
-        begin
-          for d := 2 to 7 do
-          begin
-            if (b - d > 0) and (c + d < 9) then
-            begin
-              if aBoard[b-d][c+d] = 1 then
-              begin
-                temp.Moves[temp.Count] := 8*c+b-8;
-                inc(temp.Count);
-                goto lbl_next_red;
-              end
-              else if aBoard[b-d][c+d] <> -1 then break;
-            end;
-          end;
-        end;
-      end;
-
-      if (b < 7) and (c > 2) then // bottom left
-      begin
-        if aBoard[b+1][c-1] = -1 then
-        begin
-          for d := 2 to 7 do
-          begin
-            if (b + d < 9) and (c - d > 0) then
-            begin
-              if aBoard[b+d][c-d] = 1 then
-              begin
-                temp.Moves[temp.Count] := 8*c+b-8;
-                inc(temp.Count);
-                goto lbl_next_red;
-              end
-              else if aBoard[b+d][c-d] <> -1 then break;
-            end;
-          end;
-        end;
-      end;
-
-      lbl_next_red:;
+      temp.Moves[temp.Count] := bit + 1;
+      inc(temp.Count);
     end;
+  end;
 end;
 
 procedure TForm1.FastMakeBlackMove(const aBoard:Tboard; var temp:TMoveArray);
-label lbl_next_black;
-var a,b,c,d:integer;
+var
+  moves: UInt64;
+  bit: Integer;
 begin
   temp.Count := 0;
-  for b:=1 to 8 do
-    for c:=1 to 8 do
+  moves := GetBoardMoves(aBoard.Black, aBoard.Red);
+  for bit := 0 to 63 do
+  begin
+    if (moves and (UInt64(1) shl bit)) <> 0 then
     begin
-      if aBoard[b,c] <> 0 then continue;
-
-      if (c < 7) and (aBoard[b][c+1] = 1) then
-      begin
-        for d:=2 to 7 do
-        begin
-          if c+d < 9 then
-          begin
-            if aBoard[b][c+d] = -1 then
-            begin
-              temp.Moves[temp.Count] := 8*c+b-8;
-              inc(temp.Count);
-              goto lbl_next_black;
-            end
-            else if aBoard[b][c+d] <> 1 then break;
-          end;
-        end;
-      end;
-
-      if c > 2 then
-      begin
-        if aBoard[b][c-1] = 1 then
-        begin
-          for d:=2 to 7 do
-          begin
-            if c-d > 0 then
-            begin
-              if aBoard[b][c-d] = -1 then
-              begin
-                temp.Moves[temp.Count] := 8*c+b-8;
-                inc(temp.Count);
-                goto lbl_next_black;
-              end
-              else if aBoard[b][c-d] <> 1 then break;
-            end;
-          end;
-        end;
-      end;
-
-      if b < 7 then
-      begin
-        if aBoard[b+1][c] = 1 then
-        begin
-          for d:= 2 to 7 do
-          begin
-            if b+d < 9 then
-            begin
-              if aBoard[b+d][c] = -1 then
-              begin
-                temp.Moves[temp.Count] := 8*c+b-8;
-                inc(temp.Count);
-                goto lbl_next_black;
-              end
-              else if aBoard[b+d][c] <> 1 then break;
-            end;
-          end;
-        end;
-      end;
-
-      if b > 2 then
-      begin
-        if aBoard[b-1][c] = 1 then
-        begin
-          for d := 2 to 7 do
-          begin
-            if b - d > 0 then
-            begin
-              if aBoard[b-d][c] = -1 then
-              begin
-                temp.Moves[temp.Count] := 8*c+b-8;
-                inc(temp.Count);
-                goto lbl_next_black;
-              end
-              else if aBoard[b-d][c] <> 1 then break;
-            end;
-          end;
-        end;
-      end;
-
-      if (b > 2) and (c > 2) then
-      begin
-        if aBoard[b-1][c-1] = 1 then
-        begin
-          for d := 2 to 7 do
-          begin
-            if (b - d > 0) and (c - d > 0) then
-            begin
-              if aBoard[b-d][c-d] = -1 then
-              begin
-                temp.Moves[temp.Count] := 8*c+b-8;
-                inc(temp.Count);
-                goto lbl_next_black;
-              end
-              else if aBoard[b-d][c-d] <> 1 then break;
-            end;
-          end;
-        end;
-      end;
-
-      if (b < 7) and (c < 7) then
-      begin
-        if aBoard[b+1][c+1] = 1 then
-        begin
-          for d := 2 to 7 do
-          begin
-            if (b + d < 9) and (c + d < 9) then
-            begin
-              if aBoard[b+d][c+d] = -1 then
-              begin
-                temp.Moves[temp.Count] := 8*c+b-8;
-                inc(temp.Count);
-                goto lbl_next_black;
-              end
-              else if aBoard[b+d][c+d] <> 1 then break;
-            end;
-          end;
-        end;
-      end;
-
-      if (b > 2) and (c < 7) then
-      begin
-        if aBoard[b-1][c+1] = 1 then
-        begin
-          for d := 2 to 7 do
-          begin
-            if (b - d > 0) and (c + d < 9) then
-            begin
-              if aBoard[b-d][c+d] = -1 then
-              begin
-                temp.Moves[temp.Count] := 8*c+b-8;
-                inc(temp.Count);
-                goto lbl_next_black;
-              end
-              else if aBoard[b-d][c+d] <> 1 then break;
-            end;
-          end;
-        end;
-      end;
-
-      if (b < 7) and (c > 2) then
-      begin
-        if aBoard[b+1][c-1] = 1 then
-        begin
-          for d := 2 to 7 do
-          begin
-            if (b + d < 9) and (c - d > 0) then
-            begin
-              if aBoard[b+d][c-d] = -1 then
-              begin
-                temp.Moves[temp.Count] := 8*c+b-8;
-                inc(temp.Count);
-                goto lbl_next_black;
-              end
-              else if aBoard[b+d][c-d] <> 1 then break;
-            end;
-          end;
-        end;
-      end;
-
-      lbl_next_black:;
+      temp.Moves[temp.Count] := bit + 1;
+      inc(temp.Count);
     end;
+  end;
 end;
 
 procedure TForm1.MakeRedMove(const aBoard:Tboard;var temp:TStringList);
-var b,c,d:integer;
-Label nextpeace;
+var
+  moves: UInt64;
+  bit: Integer;
 begin
- //  aBoard is for ai work
-  temp.clear;
-  for b:=1 to 8 do
-  for c:=1 to 8 do
+  temp.Clear;
+  moves := GetBoardMoves(aBoard.Red, aBoard.Black);
+  for bit := 0 to 63 do
   begin
-    if aboard[b,c] <> 0 then
-      goto nextpeace;
-    //from left to right
-      if c < 7 then if aboard[b][c+1] = -1 then
-      begin
-        for d:=2 to 7 do
-        begin
-          if c+d < 9 then
-          begin
-            if aboard[b][c+d] = 1 then
-            begin
-                temp.Add(IntTostr(8*c+b-8));
-              goto nextpeace;
-            end
-            else if aboard[b][c+d] <> -1 then break;
-          end;
-        end;
-      end;
-
-
-    if c > 2  then // from right to left
+    if (moves and (UInt64(1) shl bit)) <> 0 then
     begin
-      if aboard[b][c-1] = -1 then
-      begin
-        for d:=2 to 7 do
-        begin
-          if c-d > 0 then
-          begin
-            if aboard[b][c-d] = 1 then
-            begin
-              temp.Add(IntTostr(8*c+b-8));
-              goto nextpeace;
-            end
-            else if aboard[b][c-d] <> -1 then break;
-          end;
-        end;
-      end;
+      temp.Add(IntToStr(bit + 1));
     end;
-
-    if b < 7  then //from top to bottom
-    begin
-      if aboard[b+1][c] = -1 then
-      begin
-        for d:= 2 to 7 do
-        begin
-          if b+d < 9 then
-          begin
-            if aboard[b+d][c] = 1 then
-            begin
-              temp.Add(IntTostr(8*c+b-8));
-              goto nextpeace;;
-            end
-            else if aboard[b+d][c] <> -1 then break;
-          end;
-        end;
-      end;
-    end;
-
-    if b > 2 then //from bottom to top
-    begin
-      if aboard[b-1][c] = -1 then
-      begin
-        for d := 2 to 7 do
-        begin
-          if b - d > 0 then
-          begin
-            if aboard[b-d][c] = 1 then
-            begin
-              temp.Add(IntTostr(8*c+b-8));
-              goto nextpeace;;
-            end
-            else if aboard[b-d][c] <> -1 then break;
-          end;
-        end;
-      end;
-    end;
-
-    if (b < 7) and (c < 7) then //from left top and right bottom
-    begin
-      if aboard[b+1][c+1] = -1 then
-      begin
-        for d:= 2 to 7 do
-        begin
-          if (b+d < 9) and (c+d < 9) then
-          begin
-            if aboard[b+d][c+d] = 1 then
-            begin
-              temp.Add(IntTostr(8*c+b-8));
-              goto nextpeace;;
-            end
-            else if aboard[b+d][c+d] <> -1 then break;
-          end;
-        end;
-      end;
-    end;
-
-    if (b > 2) and (c > 2) then //from right bottom to left top
-    begin
-      if aboard[b-1][c-1] = -1 then
-      begin
-        for d:= 2 to 7 do
-        begin
-          if (b-d > 0) and (c-d > 0) then
-          begin
-            if aboard[b-d][c-d] = 1 then
-            begin
-              temp.Add(IntTostr(8*c+b-8));
-              goto nextpeace;
-            end
-            else if aboard[b-d][c-d] <> -1 then break;
-          end;
-        end;
-      end;
-    end;
-
-    if (b < 7) and (c > 2) then //from left bottom to right top
-    begin
-      if aboard[b+1][c-1] = -1 then
-      begin
-        for d :=2 to 7 do
-        begin
-          if (b+d < 9) and (c-d > 0) then
-          begin
-            if aboard[b+d][c-d] = 1 then
-            begin
-              temp.add(IntTostr(8*c+b-8));
-              goto nextpeace;
-            end
-            else if aboard[b+d][c-d] <> -1 then break;
-          end;
-        end;
-      end;
-    end;
-
-    if (b > 2) and (c < 7) then //from right top to left bottom
-    begin
-      if aboard[b-1][c+1] = -1 then
-      begin
-        for d :=2 to 7 do
-        begin
-          if (b-d > 0) and (c+d < 9) then
-          begin
-            if aboard[b-d][c+d] = 1 then
-            begin
-              temp.Add(IntTostr(8*c+b-8));
-              goto nextpeace;
-            end
-            else if aboard[b-d][c+d] <> -1 then goto nextpeace;
-          end;
-        end;
-      end;
-    end;
-    nextpeace:
   end;
 end;
 
 
 procedure TForm1.MakeblackMove(const aBoard:Tboard;var temp:TStringList);
-var b,c,d:integer;
-Label nextpeace;
+var
+  moves: UInt64;
+  bit: Integer;
 begin
-
-// make all unplayed box
   temp.Clear;
-  for b:=1 to 8 do
-  for c:=1 to 8 do
+  moves := GetBoardMoves(aBoard.Black, aBoard.Red);
+  for bit := 0 to 63 do
   begin
-    if aboard[b,c] <> 0 then
-      Continue;
-    //from left to right
-
-      if c < 7 then if aboard[b][c+1] = 1 then
-      begin
-        for d:=2 to 7 do
-        begin
-          if c+d < 9 then
-          begin
-            if aboard[b][c+d] = -1 then
-            begin
-              temp.Add(IntTostr(8*c+b-8));
-              goto nextpeace;;
-            end
-            else if aboard[b][c+d] <> 1 then break;
-          end;
-        end;
-      end;
-
-    if c > 2 then // from right to left
+    if (moves and (UInt64(1) shl bit)) <> 0 then
     begin
-      if aboard[b][c-1] = 1 then
-      begin
-        for d:=2 to 7 do
-        begin
-          if c-d > 0 then
-          begin
-            if aboard[b][c-d] = -1 then
-            begin
-              temp.Add(IntTostr(8*c+b-8));
-              goto nextpeace;
-            end
-            else if aboard[b][c-d] <> 1 then break;
-          end;
-        end;
-      end;
+      temp.Add(IntToStr(bit + 1));
     end;
-
-    if b <7 then //from top to bottom
-    begin
-      if aboard[b+1][c] = 1 then
-      begin
-        for d:= 2 to 7 do
-        begin
-          if b+d < 9 then
-          begin
-            if aboard[b+d][c] = -1 then
-            begin
-              temp.Add(IntTostr(8*c+b-8));
-              goto nextpeace;
-            end
-            else if aboard[b+d][c] <> 1 then break;
-          end;
-        end;
-      end;
-    end;
-
-    if b > 2 then //from bottom to top
-    begin
-      if aboard[b-1][c] = 1 then
-      begin
-        for d := 2 to 7 do
-        begin
-          if b - d > 0 then
-          begin
-            if aboard[b-d][c] = -1 then
-            begin
-              temp.Add(IntTostr(8*c+b-8));
-              goto nextpeace;;
-            end
-            else if aboard[b-d][c] <> 1 then
-              break;
-          end;
-        end;
-      end;
-    end;
-
-    if (b < 7) and (c < 7) then //from left top and right bottom
-    begin
-      if aboard[b+1][c+1] = 1 then
-      begin
-        for d:= 2 to 7 do
-        begin
-          if (b+d < 9) and (c+d < 9) then
-          begin
-            if aboard[b+d][c+d] = -1 then
-            begin
-              temp.Add(IntTostr(8*c+b-8));
-              goto nextpeace;
-            end
-            else if aboard[b+d][c+d] <> 1 then break;
-          end;
-        end;
-      end;
-    end;
-
-    if (b > 2) and (c > 2) then //from right bottom to left top
-    begin
-      if aboard[b-1][c-1] = 1 then
-      begin
-        for d:= 2 to 7 do
-        begin
-          if (b-d > 0) and (c-d > 0) then
-          begin
-            if aboard[b-d][c-d] = -1 then
-            begin
-              temp.Add(IntTostr(8*c+b-8));
-              goto nextpeace;
-            end
-            else if aboard[b-d][c-d] <> 1 then break;
-          end;
-        end;
-      end;
-    end;
-
-    if (b < 7) and (c > 2) then //from left bottom to right top
-    begin
-      if aboard[b+1][c-1] = 1 then
-      begin
-        for d :=2 to 7 do
-        begin
-          if (b+d < 9) and (c-d > 0) then
-          begin
-            if aboard[b+d][c-d] = -1 then
-            begin
-              temp.add(IntTostr(8*c+b-8));
-              goto nextpeace;
-            end
-            else if aboard[b+d][c-d] <> 1 then break;
-          end;
-        end;
-      end;
-    end;
-
-    if (b > 2) and (c < 7) then //from right top to left bottom
-    begin
-      if aboard[b-1][c+1] = 1 then
-      begin
-        for d :=2 to 7 do
-        begin
-          if (b-d > 0) and (c+d < 9) then
-          begin
-            if aboard[b-d][c+d] = -1 then
-            begin
-              temp.Add(IntTostr(8*c+b-8));
-              goto nextpeace;
-            end
-            else if aboard[b-d][c+d] <> 1 then goto nextpeace;
-          end;
-        end;
-      end;
-    end;
-    nextpeace:
   end;
 end;
 //end of aimove
@@ -2264,186 +1786,28 @@ begin
 end;
 
 procedure TForm1.RedBoardUpdate(var Aboard:Tboard;LastChess:Integer);
-var a,b,c,d:integer;
+var
+  moveBit: UInt64;
 begin
-  a:= LastChess;
-  c:= a div 8 +1 ;
-  b:= a mod 8;
-//  if c = 0 then
-//    Aboard[b-1][8] := 1
-//  else
-
-  if b = 0 then
-  begin
-    c:=c-1;
-    b:=8;
-  end;
-//  }
-  Aboard[b][c] := 1;
-  // left
-
-  if c > 2 then
-  begin
-    if (Aboard[b][c-1] = -1) and (Aboard[b][c-2] <> 0) then
-    begin
-      d:=1;
-      while (Aboard[b][c-d] = -1) do
-        inc(d);
-      if Aboard[b][c-d] = 1 then
-      begin
-        for a := 1 to d-1 do
-          Aboard[b][c-a] := 1;
-      end;
-    end;
-  end;
-
-
-
-  // right test
-
-  if c < 7 then
-  begin
-    if (Aboard[b][c+1] = -1) and (Aboard[b][c+2] <> 0) then
-    begin
-      d:=1;
-      while (Aboard[b][c+d] = -1) do
-        inc(d);
-      if Aboard[b][c+d] = 1 then
-      begin
-        for a := 1 to d-1 do
-          Aboard[b][c+a] := 1;
-      end;
-    end;
-  end;
-
-
-
-  //top test
-
-  if b > 2 then
-  begin
-    if (Aboard[b-1][c] = -1) and (Aboard[b-2][c] <> 0) then
-    begin
-      d:=1;
-      while (Aboard[b-d][c] = -1) do
-        inc(d);
-      if Aboard[b-d][c] = 1 then
-      begin
-        for a := 1 to d-1 do
-          Aboard[b-a][c] := 1;
-      end;
-    end;
-  end;
-
-
-   // bottom test
-
-  if b < 7 then
-  begin
-    if (Aboard[b+1][c] = -1) and (Aboard[b+2][c] <> 0) then
-    begin
-      d:=1;
-      while (Aboard[b+d][c] = -1) do
-        inc(d);
-      if Aboard[b+d][c] = 1 then
-      begin
-        for a := 1 to d-1 do
-          Aboard[b+a][c] := 1;
-      end;
-    end;
-  end;
-
-
-
-  // left top test
-
-  if (b-2>0) and (c-2 > 0) then
-  begin
-    if (Aboard[b-1][c-1] = -1) and (Aboard[b-2][c-2] <> 0) then
-    begin
-      d:=1;
-      while (Aboard[b-d][c-d] = -1) do
-        inc(d);
-      if Aboard[b-d][c-d] = 1 then
-      begin
-        for a := 1 to d-1 do
-          Aboard[b-a][c-a] := 1;
-      end;
-    end;
-  end;
-
-
-
-//   left bottom test
-
-  if (b < 7) and (c > 2) then
-  begin
-    if (Aboard[b+1][c-1] = -1) and (Aboard[b+2][c-2] <> 0) then
-    begin
-      d:=1;
-      while (Aboard[b+d][c-d] = -1) do
-        inc(d);
-      if Aboard[b+d][c-d] = 1 then
-      begin
-        for a := 1 to d-1 do
-          Aboard[b+a][c-a] := 1;
-      end;
-    end;
-  end;
-
-
-  // right bottom test
-
-  if (b < 7) and (c < 7) then
-  begin
-    if (Aboard[b+1][c+1] = -1) and (Aboard[b+2][c+2] <> 0) then
-    begin
-      d:=1;
-      while (Aboard[b+d][c+d] = -1) do
-        inc(d);
-      if Aboard[b+d][c+d] = 1 then
-      begin
-        for a := 1 to d-1 do
-          Aboard[b+a][c+a] := 1;
-      end;
-    end;
-  end;
-
-
-
-// right top fixed 2 nd
-
-  if (b-2>0) and (c+2<9) then
-  begin
-    if (Aboard[b-1][c+1] = -1) and (Aboard[b-2][c+2] <> 0) then
-    begin
-      d:=1;
-      while (Aboard[b-d][c+d] = -1) do
-        inc(d);
-      if Aboard[b-d][c+d] = 1 then
-      begin
-        for a := 1 to d-1 do
-          Aboard[b-a][c+a] := 1;
-      end;
-    end;
-  end;
-
-  // give another play
+  moveBit := UInt64(1) shl (LastChess - 1);
+  ApplyBoardMove(Aboard.Red, Aboard.Black, moveBit);
 end;
 
 procedure TForm1.RedChessClick(Sender: TObject);
 // update chess
 var a,b,c:integer;templist:tstringlist;
+    targetImg: TImage;
 begin
+  if Sender = nil then exit;
   // clean the t
   For a:= 0 to Redlist.Count-1 do
   begin
-//
-//    if TWinControl(FindComponent(Redlist[a])) <> TWinControl(Sender) then
-//    begin
-      Timage(FindComponent(Redlist[a])).picture := nil;
-      Timage(FindComponent(Redlist[a])).onclick := nil;
-//    end;
+      targetImg := TImage(FindComponent(Redlist[a]));
+      if targetImg <> nil then
+      begin
+        targetImg.picture := nil;
+        targetImg.onclick := nil;
+      end;
   end;
  // clean move
   Timage(Sender).Picture := Chess2.Picture;
@@ -2454,7 +1818,7 @@ begin
     c:=movedlist.Add('Red');
   for a:=1 to 8 do
     for b:=1 to 8 do
-      movedlist[c]:=movedlist[c]+intTostr(board[a][b]+1);
+      movedlist[c]:=movedlist[c]+intTostr(GetBoardPiece(board, a, b)+1);
   end;
   a:=StrToint(Copy(TComponent(Sender).name,6,2));
 // temp fix wrong ?
@@ -2466,7 +1830,7 @@ begin
     c:=8;
   end;
 //  a := (c-1)*8 + b;
-    board[c][b] := 1;
+    SetBoardPiece(board, b, c, 1);
 
   if notinback = true then
   begin
@@ -2490,28 +1854,28 @@ begin
     Image36.OnClick := nil;
     Image37.OnClick := nil;
     templist := Tstringlist.Create;
-    if board[4][4] = 0 then
+    if GetBoardPiece(board, 4, 4) = 0 then
     begin
        Image28.OnClick := BlackChessClick;
        Image28.Picture := BlackChess.Picture;
        Blacklist.Add('Image28');
        templist.Add('Image28');
     end;
-    if board[5][4] = 0 then
+    if GetBoardPiece(board, 4, 5) = 0 then
     begin
        Image29.OnClick := BlackChessClick;
        Image29.Picture := BlackChess.Picture;
        Blacklist.Add('Image29');
        templist.Add('Image29');
     end;
-    if board[4][5] = 0 then
+    if GetBoardPiece(board, 5, 4) = 0 then
     begin
        Image36.OnClick := BlackChessClick;
        Image36.Picture := BlackChess.Picture;
        Blacklist.Add('Image36');
        templist.Add('Image36');
     end;
-    if board[5][5] = 0 then
+    if GetBoardPiece(board, 5, 5) = 0 then
     begin
        Image37.OnClick := BlackChessClick;
        Image37.Picture := BlackChess.Picture;
@@ -2553,7 +1917,7 @@ begin
     c:=movedlist.Add('Blackpass');
     for a:=1 to 8 do
       for b:=1 to 8 do
-      movedlist[c]:=movedlist[c]+intTostr(board[a][b]+1);
+      movedlist[c]:=movedlist[c]+intTostr(GetBoardPiece(board, a, b)+1);
     if StepListBox.items.count > 1 then
       backbutton.enabled:=True;
     if RedNoMove = True then
@@ -2596,7 +1960,7 @@ begin
         c:=movedlist.Add('Redpass');
         for a:=1 to 8 do
          for b:=1 to 8 do
-        movedlist[c]:=movedlist[c]+intTostr(board[a][b]+1);
+        movedlist[c]:=movedlist[c]+intTostr(GetBoardPiece(board, a, b)+1);
         end;
         if StepListBox.items.count > 1 then
           backbutton.enabled:=True;
@@ -2614,52 +1978,52 @@ begin
 end;
 
 procedure TForm1.Score(const Aboard:Tboard;var RedScore,BlackScore:integer);
-var a,b:integer;
 begin
-  RedScore:=0;
-  BlackScore:=0;
-  for a:= 1 to 8 do
-  begin
-    for b:= 1 to 8 do
-    begin
-      if Aboard[a][b] = 1 then inc(RedScore)
-      else if Aboard[a][b] = -1 then inc(BlackScore)
-    end;
-  end;
+  RedScore := PopCount(Aboard.Red);
+  BlackScore := PopCount(Aboard.Black);
 end;
 
 procedure TForm1.Updateboard;
-var a,b:integer;
+var a,b,val:integer;
+    targetImg: TImage;
 begin
 // draw general picture
-  for a:= 1 to 8 do
-    for b:= 1 to 8 do
+  for a := 1 to 8 do
+    for b := 1 to 8 do
     begin
-      if board[a,b] = 1 then
-        Timage(FindComponent('image'+intTostr(8*b+a-8))).picture := Chess2.picture
-      else if board[a,b] = -1 then
-        Timage(FindComponent('image'+intTostr(8*b+a-8))).picture := Chess1.picture
-      else if board[a,b] = 0 then
-        Timage(FindComponent('image'+intTostr(8*b+a-8))).picture := nil;
-      Timage(FindComponent('image'+intTostr(8*b+a-8))).onclick := nil;
+      val := GetBoardPiece(board, a, b);
+      targetImg := TImage(FindComponent('Image'+intTostr(8*a+b-8)));
+      if targetImg <> nil then
+      begin
+        if val = 1 then
+          targetImg.picture := Chess2.picture
+        else if val = -1 then
+          targetImg.picture := Chess1.picture
+        else
+          targetImg.picture := nil;
+        targetImg.onclick := nil;
+      end;
     end;
 // draw red picture
 
-//  for a:=0 to movelist.Lines.Count-1 do
   for a:=0 to Redlist.Count-1 do
   begin
-    Timage(FindComponent(Redlist[a])).picture := Redchess.picture;
-    Timage(FindComponent(Redlist[a])).OnClick := Redchess.onclick;
-//    Timage(FindComponent(movelist.Lines[a])).picture := Redchess.picture;
-//    Timage(FindComponent(movelist.Lines[a])).OnClick := Redchess.onclick;
+    targetImg := TImage(FindComponent(Redlist[a]));
+    if targetImg <> nil then
+    begin
+      targetImg.picture := Redchess.picture;
+      targetImg.OnClick := Redchess.onclick;
+    end;
   end;
-//  for a:=0 to movelist.Lines.Count-1 do
+
   for a:=0 to Blacklist.Count-1 do
   begin
-    Timage(FindComponent(Blacklist[a])).picture := BlackChess.picture;
-    Timage(FindComponent(Blacklist[a])).OnClick := BlackChess.onclick;
-//    Timage(FindComponent(Blacklist.Lines[a])).picture := Chess4.picture;
-//    Timage(FindComponent(Blacklist.Lines[a])).OnClick := chess4.onclick;
+    targetImg := TImage(FindComponent(Blacklist[a]));
+    if targetImg <> nil then
+    begin
+      targetImg.picture := BlackChess.picture;
+      targetImg.OnClick := BlackChess.onclick;
+    end;
   end;
 end;
 
@@ -2695,7 +2059,7 @@ begin
   for a:= 1 to 8 do
     for b:= 1 to 8 do
     begin
-      board[a][b]:=0;
+        SetBoardPiece(board, a, b, 0);
       Timage(FindComponent('image'+intTostr(8*a+b-8))).picture := nil;
       Timage(FindComponent('image'+intTostr(8*a+b-8))).Onclick := nil;
     end;
@@ -2737,13 +2101,12 @@ procedure TForm1.Startposition1ButtonClick(Sender: TObject);
 var a,b:integer;
 begin
 //  RedMove:=True;
-  for a:= 1 to 8 do
-    for b:= 1 to 8 do
-      Initboard[a][b]:=0;
-  Initboard[4][4]:=-1;
-  Initboard[4][5]:=1;
-  Initboard[5][4]:=1;
-  Initboard[5][5]:=-1;
+  Initboard.Red := 0;
+  Initboard.Black := 0;
+  SetBoardPiece(Initboard, 4, 4, -1);
+  SetBoardPiece(Initboard, 4, 5, 1);
+  SetBoardPiece(Initboard, 5, 4, 1);
+  SetBoardPiece(Initboard, 5, 5, -1);
 
   board:=Initboard;
   FirstIsRed:=True;
@@ -2780,12 +2143,14 @@ procedure TForm1.Startposition2ButtonClick(Sender: TObject);
 var a,b:integer;
 begin
  for a:= 1 to 8 do
-    for b:= 1 to 8 do
-      Initboard[a][b]:=0;
-  Initboard[4][4]:=-1;
-  Initboard[4][5]:=-1;
-  Initboard[5][4]:=1;
-  Initboard[5][5]:=1;
+    begin
+    end;
+  Initboard.Red := 0;
+  Initboard.Black := 0;
+  SetBoardPiece(Initboard, 4, 4, -1); // Black
+  SetBoardPiece(Initboard, 5, 4, -1); // Black
+  SetBoardPiece(Initboard, 4, 5, 1);  // Red
+  SetBoardPiece(Initboard, 5, 5, 1);  // Red
 
   board:=Initboard;
   FirstIsRed:=True;
@@ -2812,13 +2177,12 @@ end;
 procedure TForm1.Startposition3ButtonClick(Sender: TObject);
 var a,b:integer;
 begin
- for a:= 1 to 8 do
-    for b:= 1 to 8 do
-      Initboard[a][b]:=0;
-  Initboard[4][4]:=1;
-  Initboard[4][5]:=-1;
-  Initboard[5][4]:=-1;
-  Initboard[5][5]:=1;
+  Initboard.Red := 0;
+  Initboard.Black := 0;
+  SetBoardPiece(Initboard, 4, 4, 1);
+  SetBoardPiece(Initboard, 4, 5, -1);
+  SetBoardPiece(Initboard, 5, 4, -1);
+  SetBoardPiece(Initboard, 5, 5, 1);
 
   board:=Initboard;
   FirstIsRed:=True;
@@ -2845,13 +2209,12 @@ end;
 procedure TForm1.Startposition4ButtonClick(Sender: TObject);
 var a,b:integer;
 begin
- for a:= 1 to 8 do
-    for b:= 1 to 8 do
-      Initboard[a][b]:=0;
-  Initboard[4][4]:=1;
-  Initboard[4][5]:=1;
-  Initboard[5][4]:=-1;
-  Initboard[5][5]:=-1;
+  Initboard.Red := 0;
+  Initboard.Black := 0;
+  SetBoardPiece(Initboard, 4, 4, 1);  // Red
+  SetBoardPiece(Initboard, 5, 4, 1);  // Red
+  SetBoardPiece(Initboard, 4, 5, -1); // Black
+  SetBoardPiece(Initboard, 5, 5, -1); // Black
 
   board:=Initboard;
   FirstIsRed:=True;
@@ -2878,13 +2241,12 @@ end;
 procedure TForm1.Startposition6uttonClick(Sender: TObject);
 var a,b:integer;
 begin
- for a:= 1 to 8 do
-    for b:= 1 to 8 do
-      Initboard[a][b]:=0;
-  Initboard[4][4]:=-1;
-  Initboard[4][5]:=1;
-  Initboard[5][4]:=-1;
-  Initboard[5][5]:=1;
+  Initboard.Red := 0;
+  Initboard.Black := 0;
+  SetBoardPiece(Initboard, 4, 4, -1);
+  SetBoardPiece(Initboard, 4, 5, -1);
+  SetBoardPiece(Initboard, 5, 4, 1);
+  SetBoardPiece(Initboard, 5, 5, 1);
 
   board:=Initboard;
   FirstIsRed:=True;
@@ -2911,13 +2273,12 @@ end;
 procedure TForm1.StartpositionButtonClick(Sender: TObject);
 var a,b:integer;
 begin
- for a:= 1 to 8 do
-    for b:= 1 to 8 do
-      Initboard[a][b]:=0;
-  Initboard[4][4]:=1;
-  Initboard[4][5]:=-1;
-  Initboard[5][4]:=1;
-  Initboard[5][5]:=-1;
+  Initboard.Red := 0;
+  Initboard.Black := 0;
+  SetBoardPiece(Initboard, 4, 4, 1);
+  SetBoardPiece(Initboard, 4, 5, 1);
+  SetBoardPiece(Initboard, 5, 4, -1);
+  SetBoardPiece(Initboard, 5, 5, -1);
 
   board:=Initboard;
   FirstIsRed:=True;
@@ -2947,183 +2308,29 @@ begin
 end;
 
 procedure TForm1.BlackBoardUpdate(var Aboard:Tboard;LastChess:Integer);
-// update chess
-var a,b,c,d:integer;
+var
+  moveBit: UInt64;
 begin
-  a:=LastChess;
-  c:= a div 8 +1 ;
-  b:= a mod 8;
-//  if c = 0 then
-//    Aboard[b-1][8] := -1
-
-  if b = 0 then
-  begin
-    c:=c-1;
-    b:=8;
-  end;
-
-//  else
-    Aboard[b][c] := -1;
-  // left
-
-  if c > 2 then
-  begin
-    if (Aboard[b][c-1] = 1) and (Aboard[b][c-2] <> 0) then
-    begin
-      d:=1;
-      while (Aboard[b][c-d] = 1) do
-        inc(d);
-      if Aboard[b][c-d] = -1 then
-      begin
-        for a := 1 to d-1 do
-          Aboard[b][c-a] := -1;
-      end;
-    end;
-  end;
-
-
-
-  // right test
-
-  if c < 7 then
-  begin
-    if (Aboard[b][c+1] = 1) and (Aboard[b][c+2] <> 0) then
-    begin
-      d:=1;
-      while (Aboard[b][c+d] = 1) do
-        inc(d);
-      if Aboard[b][c+d] = -1 then
-      begin
-        for a := 1 to d-1 do
-          Aboard[b][c+a] := -1;
-      end;
-    end;
-  end;
-
-
-  //top corrected test
-
-  if b > 2 then
-  begin
-    if (Aboard[b-1][c] = 1) and (Aboard[b-2][c] <> 0) then
-    begin
-      d:=1;
-      while (Aboard[b-d][c] = 1) do
-        inc(d);
-      if Aboard[b-d][c] = -1 then
-      begin
-        for a := 1 to d-1 do
-          Aboard[b-a][c] := -1;
-      end;
-    end;
-  end;
-
-
-
-   // bottom test
-
-  if b< 7 then
-  begin
-    if (Aboard[b+1][c] = 1) and (Aboard[b+2][c] <> 0) then
-    begin
-      d:=1;
-      while (Aboard[b+d][c] = 1) do
-        inc(d);
-      if Aboard[b+d][c] = -1 then
-      begin
-        for a := 1 to d-1 do
-          Aboard[b+a][c] := -1;
-      end;
-    end;
-  end;
-
-
-
-  // left top test
-
-  if (b-2>0) and (c-2>0) then
-  begin
-    if (Aboard[b-1][c-1] = 1) and (Aboard[b-2][c-2] <> 0) then
-    begin
-      d:=1;
-      while (Aboard[b-d][c-d] = 1) do
-        inc(d);
-      if Aboard[b-d][c-d] = -1 then
-      begin
-        for a := 1 to d-1 do
-          Aboard[b-a][c-a] := -1;
-      end;
-    end;
-  end;
-
-
-//   left bottom test
-
-  if (b+2<9) and (c-2>0) then
-  begin
-    if (Aboard[b+1][c-1] = 1) and (Aboard[b+2][c-2] <> 0) then
-    begin
-      d:=1;
-      while (Aboard[b+d][c-d] = 1) do
-        inc(d);
-      if Aboard[b+d][c-d] = -1 then
-      begin
-        for a := 1 to d-1 do
-          Aboard[b+a][c-a] := -1;
-      end;
-    end;
-  end;
-
-
-  // right bottom  test
-
-  if (b+2<9) and (c+2<9) then
-  begin
-    if (Aboard[b+1][c+1] = 1) and (Aboard[b+2][c+2] <> 0) then
-    begin
-      d:=1;
-      while (Aboard[b+d][c+d] = 1) do
-        inc(d);
-      if Aboard[b+d][c+d] = -1 then
-      begin
-        for a := 1 to d-1 do
-          Aboard[b+a][c+a] := -1;
-      end;
-    end;
-  end;
-
-
-// right top fixed 2 nd
-
-  if (b-2>0) and (c+2<9) then
-  begin
-    if (Aboard[b-1][c+1] = 1) and (Aboard[b-2][c+2] <> 0) then
-    begin
-      d:=1;
-      while (Aboard[b-d][c+d] = 1) do
-        inc(d);
-      if Aboard[b-d][c+d] = -1 then
-      begin
-        for a := 1 to d-1 do
-          Aboard[b-a][c+a] := -1;
-      end;
-    end;
-  end;
+  moveBit := UInt64(1) shl (LastChess - 1);
+  ApplyBoardMove(Aboard.Black, Aboard.Red, moveBit);
 end;
 
 
 procedure TForm1.BlackChessClick(Sender: TObject);
 // update chess
 var a,b,c:integer;templist:Tstringlist;
+    targetImg: TImage;
 begin
+  if Sender = nil then exit;
   // clean the made move
   For a:= 0 to Blacklist.Count-1 do
   begin
-//    if TWinControl(FindComponent(Blacklist[a])) <> TWinControl(Sender) then
-//    begin
-      Timage(FindComponent(Blacklist[a])).picture := nil;
-      Timage(FindComponent(Blacklist[a])).onclick := nil;
-//    end;
+      targetImg := TImage(FindComponent(Blacklist[a]));
+      if targetImg <> nil then
+      begin
+        targetImg.picture := nil;
+        targetImg.onclick := nil;
+      end;
   end;
   // clean move
     Timage(Sender).Picture := Chess1.Picture;
@@ -3133,7 +2340,7 @@ begin
     c:=movedlist.Add('Black');
     for a:=1 to 8 do
     for b:=1 to 8 do
-      movedlist[c]:=movedlist[c]+intTostr(board[a][b]+1);
+      movedlist[c]:=movedlist[c]+intTostr(GetBoardPiece(board, a, b)+1);
   end;
 
   a:=StrToint(Copy(TComponent(Sender).name,6,2));
@@ -3146,7 +2353,7 @@ begin
     c:=8;
   end;
 //  a := (c-1)*8 + b;
-  board[c][b] := -1;
+  SetBoardPiece(board, b, c, -1);
   if notinback = true then
   begin
     if c <> 0 then
@@ -3169,28 +2376,28 @@ begin
     Image36.OnClick := nil;
     Image37.OnClick := nil;
     templist := Tstringlist.Create;
-    if board[4][4] = 0 then
+    if GetBoardPiece(board, 4, 4) = 0 then
     begin
        Image28.OnClick := RedChessClick;
        Image28.Picture := RedChess.Picture;
        Blacklist.Add('Image28');
        templist.Add('Image28');
     end;
-    if board[5][4] = 0 then
+    if GetBoardPiece(board, 4, 5) = 0 then
     begin
        Image29.OnClick := RedChessClick;
        Image29.Picture := RedChess.Picture;
        Blacklist.Add('Image29');
        templist.Add('Image29');
     end;
-    if board[4][5] = 0 then
+    if GetBoardPiece(board, 5, 4) = 0 then
     begin
        Image36.OnClick := RedChessClick;
        Image36.Picture := RedChess.Picture;
        Blacklist.Add('Image36');
        templist.Add('Image36');
     end;
-    if board[5][5] = 0 then
+    if GetBoardPiece(board, 5, 5) = 0 then
     begin
        Image37.OnClick := RedChessClick;
        Image37.Picture := RedChess.Picture;
@@ -3232,7 +2439,7 @@ begin
     c:=movedlist.Add('Red');
     for a:=1 to 8 do
      for b:=1 to 8 do
-    movedlist[c]:=movedlist[c]+intTostr(board[a][b]+1);
+    movedlist[c]:=movedlist[c]+intTostr(GetBoardPiece(board, a, b)+1);
 //may be correcteed
     if RedNoMove = True then
     begin
@@ -3272,7 +2479,7 @@ begin
         c:=movedlist.Add('Black');
         for a:=1 to 8 do
          for b:=1 to 8 do
-        movedlist[c]:=movedlist[c]+intTostr(board[a][b]+1);
+        movedlist[c]:=movedlist[c]+intTostr(GetBoardPiece(board, a, b)+1);
       end;
       score(board,a,b);
       //corrected
@@ -3308,7 +2515,7 @@ begin
       begin
         c:='';
         for a:=1 to 8 do
-          c:=c+intTostr(initboard[a][b]+1);
+          c:=c+intTostr(GetBoardPiece(initboard, a, b)+1);
         Writeln(F,c);
       end;
       Writeln(F,'Mode');
@@ -3348,7 +2555,7 @@ end;
 
 
 Function TForm1.BoardtoFen:String;
-var x,y,t:integer;
+var x,y,t,val:integer;
 begin
 //abc
   Result:='';
@@ -3357,9 +2564,10 @@ begin
     t:=0;
     for x:= 1 to 8 do
     begin
-       if initboard[x][y] = 0 then
+       val := GetBoardPiece(initboard, x, y);
+       if val = 0 then
           inc(t)
-       else if initboard[x][y] = -1 then
+       else if val = -1 then
        begin
           if t <> 0 then
             Result:= Result + inttostr(t) + 'B'
@@ -3367,7 +2575,7 @@ begin
             Result:= Result +'B';
           t:=0;
        end
-       else if initboard[x][y] = 1 then
+       else if val = 1 then
        begin
           if t <> 0 then
             Result:= Result + inttostr(t) + 'R'
@@ -3464,28 +2672,28 @@ begin
     Image36.OnClick := nil;
     Image37.OnClick := nil;
     templist := Tstringlist.Create;
-    if board[4][4] = 0 then
+    if GetBoardPiece(board, 4, 4) = 0 then
     begin
        Image28.OnClick := RedChessClick;
        Image28.Picture := RedChess.Picture;
        Redlist.Add('Image28');
        templist.Add('Image28');
     end;
-    if board[5][4] = 0 then
+    if GetBoardPiece(board, 5, 4) = 0 then
     begin
        Image29.OnClick := RedChessClick;
        Image29.Picture := RedChess.Picture;
        Redlist.Add('Image29');
        templist.Add('Image29');
     end;
-    if board[4][5] = 0 then
+    if GetBoardPiece(board, 4, 5) = 0 then
     begin
        Image36.OnClick := RedChessClick;
        Image36.Picture := RedChess.Picture;
        Redlist.Add('Image36');
        templist.Add('Image36');
     end;
-    if board[5][5] = 0 then
+    if GetBoardPiece(board, 5, 5) = 0 then
     begin
        Image37.OnClick := RedChessClick;
        Image37.Picture := RedChess.Picture;
@@ -3518,28 +2726,28 @@ begin
     Image36.OnClick := nil;
     Image37.OnClick := nil;
     templist := Tstringlist.Create;
-    if board[4][4] = 0 then
+    if GetBoardPiece(board, 4, 4) = 0 then
     begin
        Image28.OnClick := BlackChessClick;
        Image28.Picture := BlackChess.Picture;
        Blacklist.Add('Image28');
        templist.Add('Image28');
     end;
-    if board[5][4] = 0 then
+    if GetBoardPiece(board, 4, 5) = 0 then
     begin
        Image29.OnClick := BlackChessClick;
        Image29.Picture := BlackChess.Picture;
        Blacklist.Add('Image29');
        templist.Add('Image29');
     end;
-    if board[4][5] = 0 then
+    if GetBoardPiece(board, 5, 4) = 0 then
     begin
        Image36.OnClick := BlackChessClick;
        Image36.Picture := BlackChess.Picture;
        Blacklist.Add('Image36');
        templist.Add('Image36');
     end;
-    if board[5][5] = 0 then
+    if GetBoardPiece(board, 5, 5) = 0 then
     begin
        Image37.OnClick := BlackChessClick;
        Image37.Picture := BlackChess.Picture;
@@ -3584,28 +2792,28 @@ begin
     Image36.OnClick := nil;
     Image37.OnClick := nil;
     templist := Tstringlist.Create;
-    if board[4][4] = 0 then
+    if GetBoardPiece(board, 4, 4) = 0 then
     begin
        Image28.OnClick := BlackChessClick;
        Image28.Picture := BlackChess.Picture;
        Blacklist.Add('Image28');
        templist.Add('Image28');
     end;
-    if board[5][4] = 0 then
+    if GetBoardPiece(board, 4, 5) = 0 then
     begin
        Image29.OnClick := BlackChessClick;
        Image29.Picture := BlackChess.Picture;
        Blacklist.Add('Image29');
        templist.Add('Image29');
     end;
-    if board[4][5] = 0 then
+    if GetBoardPiece(board, 5, 4) = 0 then
     begin
        Image36.OnClick := BlackChessClick;
        Image36.Picture := BlackChess.Picture;
        Blacklist.Add('Image36');
        templist.Add('Image36');
     end;
-    if board[5][5] = 0 then
+    if GetBoardPiece(board, 5, 5) = 0 then
     begin
        Image37.OnClick := BlackChessClick;
        Image37.Picture := BlackChess.Picture;
@@ -3638,28 +2846,28 @@ begin
     Image36.OnClick := nil;
     Image37.OnClick := nil;
     templist := Tstringlist.Create;
-    if board[4][4] = 0 then
+    if GetBoardPiece(board, 4, 4) = 0 then
     begin
        Image28.OnClick := RedChessClick;
        Image28.Picture := RedChess.Picture;
        Redlist.Add('Image28');
        templist.Add('Image28');
     end;
-    if board[5][4] = 0 then
+    if GetBoardPiece(board, 5, 4) = 0 then
     begin
        Image29.OnClick := RedChessClick;
        Image29.Picture := RedChess.Picture;
        Redlist.Add('Image29');
        templist.Add('Image29');
     end;
-    if board[4][5] = 0 then
+    if GetBoardPiece(board, 4, 5) = 0 then
     begin
        Image36.OnClick := RedChessClick;
        Image36.Picture := RedChess.Picture;
        Redlist.Add('Image36');
        templist.Add('Image36');
     end;
-    if board[5][5] = 0 then
+    if GetBoardPiece(board, 5, 5) = 0 then
     begin
        Image37.OnClick := RedChessClick;
        Image37.Picture := RedChess.Picture;
@@ -3716,7 +2924,7 @@ begin
   For a:=1 to 8 do
   begin
     for b:=1 to 8 do
-      Timage(FindComponent('image'+intTostr(8*b+a-8))).Tag:=board[a][b];
+      Timage(FindComponent('image'+intTostr(8*b+a-8))).Tag:=GetBoardPiece(board, a, b);
   end;
 
 
@@ -3743,7 +2951,8 @@ begin
 end;
 
 procedure TForm1.FinishSetupboardClick(Sender: TObject);
-var a,b:integer;templist:Tstringlist;
+var a,b,val:integer;templist:Tstringlist;
+    targetImg: TImage;
 begin
   form1.Tag:=0;
   templist := Tstringlist.Create;
@@ -3763,12 +2972,19 @@ begin
   redlist.Clear;
   blacklist.Clear;
   BackButton.Enabled:=False;
+  Initboard.Red := 0;
+  Initboard.Black := 0;
   For a:=1 to 8 do
   begin
     For b:=1 to 8 do
     begin
-     Initboard[a][b]:= Timage(FindComponent('image'+intTostr(8*b+a-8))).Tag;
-     Timage(FindComponent('image'+intTostr(8*b+a-8))).Tag := 0;
+     targetImg := TImage(FindComponent('Image'+intTostr(8*a+b-8)));
+     if targetImg <> nil then
+     begin
+       val := targetImg.Tag;
+       SetBoardPiece(Initboard, a, b, val);
+       targetImg.Tag := 0;
+     end;
     end;
   end;
   board:=Initboard;
@@ -3861,7 +3077,7 @@ begin
   begin
     for b:=1 to 8 do
     begin
-      board[a][b]:=Timage(FindComponent('image'+intTostr(8*b+a-8))).Tag;
+      SetBoardPiece(board, a, b, Timage(FindComponent('image'+intTostr(8*b+a-8))).Tag);
       Timage(FindComponent('image'+intTostr(8*b+a-8))).Tag:=0;
     end;
   end;
@@ -3920,11 +3136,13 @@ begin
     readln(f,a);
     blacklist.Clear;
     redlist.Clear;
+    Initboard.Red := 0;
+    Initboard.Black := 0;
     for b:=1 to 8 do
     begin
       readln(f,a);
       for c:= 1 to 8 do
-        initboard[c][b]:= strToint(copy(a,c,1))-1; //need test
+        SetBoardPiece(initboard, b, c, strToint(copy(a,c,1))-1); //need test
     end;
     readln(f,a);
     readln(f,h);
@@ -3961,12 +3179,12 @@ begin
           e:=movedlist.Add('Red');
           for c:=1 to 8 do
            for d:=1 to 8 do
-             movedlist[e]:=movedlist[e]+intTostr(board[c][d]+1);
+             movedlist[e]:=movedlist[e]+intTostr(GetBoardPiece(board, c, d)+1);
           c:= strtoint(copy(StepListBox.Items[b],5,1));
           d:= strtoint(copy(StepListBox.Items[b],7,1));
           MakeRedMove(board,templist);
           MakeClick(templist,'player1');
-          RedChessClick(Timage(FindComponent('image'+intTostr(8*d+c-8))));
+          RedChessClick(Timage(FindComponent('Image'+intTostr(8*d+c-8))));
   //        redlist.Clear;
 //          blacklist.Clear;
 //          updateboard;
@@ -3975,7 +3193,7 @@ begin
           e:=movedlist.Add('Redpass');
           for c:=1 to 8 do
           for d:=1 to 8 do
-          movedlist[e]:=movedlist[e]+intTostr(board[c][d]+1);
+          movedlist[e]:=movedlist[e]+intTostr(GetBoardPiece(board, c, d)+1);
         end;
       end
       else if copy(StepListBox.Items[b],1,5) = 'Black' then
@@ -3985,19 +3203,19 @@ begin
           e:=movedlist.Add('Black');
           for c:=1 to 8 do
            for d:=1 to 8 do
-             movedlist[e]:=movedlist[e]+intTostr(board[c][d]+1);
+             movedlist[e]:=movedlist[e]+intTostr(GetBoardPiece(board, c, d)+1);
 
           c:= strtoint(copy(StepListBox.Items[b],7,1));
           d:= strtoint(copy(StepListBox.Items[b],9,1));
-          MakeRedMove(board,templist);
-          MakeClick(templist,'player1');
-          BlackChessClick(Timage(FindComponent('image'+intTostr(8*d+c-8))));
+          MakeBlackMove(board,templist);
+          MakeClick(templist,'player2');
+          BlackChessClick(Timage(FindComponent('Image'+intTostr(8*d+c-8))));
         end
         else begin
           e:=movedlist.Add('Blackpass');
           for c:=1 to 8 do
           for d:=1 to 8 do
-          movedlist[e]:=movedlist[e]+intTostr(board[c][d]+1);
+          movedlist[e]:=movedlist[e]+intTostr(GetBoardPiece(board, c, d)+1);
         end;
       end;
     end;
@@ -4047,16 +3265,20 @@ end;
 
 procedure TForm1.ClearButtonClick(Sender: TObject);
 var a,b:integer;
+    targetImg: TImage;
 begin
    for a:=1 to 8 do
     begin
       for b:=1 to 8 do
       begin
-        Timage(FindComponent('image'+intTostr(8*a+b-8))).picture := nil;
-        Timage(FindComponent('image'+intTostr(8*a+b-8))).tag := 0;
+        targetImg := TImage(FindComponent('Image'+intTostr(8*a+b-8)));
+        if targetImg <> nil then
+        begin
+          targetImg.picture := nil;
+          targetImg.tag := 0;
+        end;
       end;
     end;
-
 end;
 
 procedure TForm1.BackButtonClick(Sender: TObject);
@@ -4104,7 +3326,7 @@ begin
       a:=5;//6
     for b:=1 to 8 do
     for c:=1 to 8 do
-      board[b][c]:=strToint(copy(movedlist[movedlist.Count-1],8*b-8+a+c,1))-1;
+      SetBoardPiece(board, b, c, strToint(copy(movedlist[movedlist.Count-1],8*b-8+a+c,1))-1);
     if copy(movedlist[movedlist.Count-1],1,3) = 'Red' then
     begin
       MakeRedMove(board,templist);
@@ -4489,7 +3711,7 @@ begin
            AIDisplayScoreLabel.caption:=intTostr(a);
            redlist.Clear;
            blacklist.Clear;
-           Result:='image'+ inttostr(thinkstep.Moves[0]);
+           Result:='Image'+ inttostr(thinkstep.Moves[0]);
            aimovelist := AIDisplayScoreLabel.caption + ':'+ aimovelist;
            AiListBox.Items.Add(aimovelist);
            ThinkstepEdit.text:=aimovelist;
@@ -4508,7 +3730,7 @@ begin
                AIDisplayScoreLabel.caption:=intTostr(a);
                redlist.Clear;
                blacklist.Clear;
-               Result:='image'+ inttostr(thinkstep.Moves[0]);
+               Result:='Image'+ inttostr(thinkstep.Moves[0]);
                aimovelist := AIDisplayScoreLabel.caption + ':'+ aimovelist;
                AiListBox.Items.Add(aimovelist);
                ThinkstepEdit.text:=aimovelist;
@@ -4772,24 +3994,27 @@ begin
   b:=0;
   Score(Aboard,a,b);
   if a+b <= 59 then begin
-    if aboard[1][1] = 0 then
-      Result:= b-a+aboard[2][1]*posmark[2][1]+aboard[1][2]*posmark[1][2]
+    if GetBoardPiece(Aboard, 1, 1) = 0 then
+      Result:= b-a+GetBoardPiece(Aboard, 2, 1)*posmark[2][1]+GetBoardPiece(Aboard, 1, 2)*posmark[1][2]
     else
-      Result:= b-a+aboard[1][1]*posmark[1][1];
-    if aboard[8][1] = 0 then
-      Result:= Result+aboard[7][1]*posmark[7][1]+aboard[8][2]*posmark[8][2]
-    else
-      Result:= Result+aboard[8][1]*posmark[8][1];
-    if aboard[1][8] = 0 then
-      Result:= Result+aboard[1][7]*posmark[1][7]+aboard[2][8]*posmark[2][8]
-    else
-      Result:= Result+aboard[1][8]*posmark[1][8];
-    if aboard[8][8] = 0 then
-      Result:= Result+aboard[8][7]*posmark[8][7]+aboard[7][8]*posmark[7][8]
-    else
-      Result:= Result+aboard[8][8]*posmark[8][8];
+      Result:= b-a+GetBoardPiece(Aboard, 1, 1)*posmark[1][1];
 
-    if  not SideIsRed then
+    if GetBoardPiece(Aboard, 8, 1) = 0 then
+      Result:= Result+GetBoardPiece(Aboard, 7, 1)*posmark[7][1]+GetBoardPiece(Aboard, 8, 2)*posmark[8][2]
+    else
+      Result:= Result+GetBoardPiece(Aboard, 8, 1)*posmark[8][1];
+
+    if GetBoardPiece(Aboard, 1, 8) = 0 then
+      Result:= Result+GetBoardPiece(Aboard, 1, 7)*posmark[1][7]+GetBoardPiece(Aboard, 2, 8)*posmark[2][8]
+    else
+      Result:= Result+GetBoardPiece(Aboard, 1, 8)*posmark[1][8];
+
+    if GetBoardPiece(Aboard, 8, 8) = 0 then
+      Result:= Result+GetBoardPiece(Aboard, 8, 7)*posmark[8][7]+GetBoardPiece(Aboard, 7, 8)*posmark[7][8]
+    else
+      Result:= Result+GetBoardPiece(Aboard, 8, 8)*posmark[8][8];
+
+    if not SideIsRed then
       Result:= -Result;
   end
  else begin
