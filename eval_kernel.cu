@@ -17,51 +17,51 @@ __constant__ int c_posmark[100];
 #define SHIFT_UR(x) (((x) >> 7) & 0xfefefefefefefefeULL)
 #define SHIFT_UL(x) (((x) >> 9) & 0x7f7f7f7f7f7f7f7fULL)
 
-__device__ __forceinline__ int get_piece(int bit, uint64 red, uint64 black) {
+__device__ __forceinline__ int get_piece_val(int bit, uint64 red, uint64 black) {
     if (red & (1ULL << bit)) return 1;
     if (black & (1ULL << bit)) return -1;
     return 0;
 }
 
-__device__ int evaluate_bitboard(uint64 red, uint64 black, int side_is_red) {
+__device__ __forceinline__ int evaluate_bitboard(uint64 red, uint64 black, int side_is_red) {
     int red_score = __popcll(red);
     int black_score = __popcll(black);
     int total = red_score + black_score;
 
-    int result = 0;
     if (total <= 59) {
-        result = black_score - red_score;
+        int result = black_score - red_score;
+        uint64 occupied = red | black;
 
-        // Corner (1,1) -> bit 0. Neighbors: 8 (2,1), 1 (1,2)
-        if (!((red | black) & (1ULL << 0)))
-            result += get_piece(8, red, black) * c_posmark[21] + get_piece(1, red, black) * c_posmark[12];
+        // Corner (1,1) -> bit 0
+        if (!(occupied & (1ULL << 0)))
+            result += get_piece_val(8, red, black) * c_posmark[21] + get_piece_val(1, red, black) * c_posmark[12];
         else
-            result += get_piece(0, red, black) * c_posmark[11];
+            result += get_piece_val(0, red, black) * c_posmark[11];
 
-        // Corner (1,8) -> bit 7. Neighbors: 6 (1,7), 15 (2,8)
-        if (!((red | black) & (1ULL << 7)))
-            result += get_piece(6, red, black) * c_posmark[17] + get_piece(15, red, black) * c_posmark[28];
+        // Corner (1,8) -> bit 7
+        if (!(occupied & (1ULL << 7)))
+            result += get_piece_val(6, red, black) * c_posmark[17] + get_piece_val(15, red, black) * c_posmark[28];
         else
-            result += get_piece(7, red, black) * c_posmark[18];
+            result += get_piece_val(7, red, black) * c_posmark[18];
 
-        // Corner (8,1) -> bit 56. Neighbors: 48 (7,1), 57 (8,2)
-        if (!((red | black) & (1ULL << 56)))
-            result += get_piece(48, red, black) * c_posmark[71] + get_piece(57, red, black) * c_posmark[82];
+        // Corner (8,1) -> bit 56
+        if (!(occupied & (1ULL << 56)))
+            result += get_piece_val(48, red, black) * c_posmark[71] + get_piece_val(57, red, black) * c_posmark[82];
         else
-            result += get_piece(56, red, black) * c_posmark[81];
+            result += get_piece_val(56, red, black) * c_posmark[81];
 
-        // Corner (8,8) -> bit 63. Neighbors: 62 (8,7), 55 (7,8)
-        if (!((red | black) & (1ULL << 63)))
-            result += get_piece(62, red, black) * c_posmark[87] + get_piece(55, red, black) * c_posmark[78];
+        // Corner (8,8) -> bit 63
+        if (!(occupied & (1ULL << 63)))
+            result += get_piece_val(62, red, black) * c_posmark[87] + get_piece_val(55, red, black) * c_posmark[78];
         else
-            result += get_piece(63, red, black) * c_posmark[88];
+            result += get_piece_val(63, red, black) * c_posmark[88];
 
-        if (!side_is_red) result = -result;
+        // Match Pascal: negate ONLY if not SideIsRed
+        return side_is_red ? result : -result;
     } else {
-        if (side_is_red) result = black_score - red_score;
-        else result = red_score - black_score;
+        // Match Pascal: endgame logic
+        return side_is_red ? (black_score - red_score) : (red_score - black_score);
     }
-    return result;
 }
 
 __device__ __forceinline__ uint64 get_moves(uint64 own, uint64 opp) {
@@ -99,62 +99,53 @@ __device__ __forceinline__ void make_move(uint64& own, uint64& opp, uint64 move)
 }
 
 __device__ int alphabeta_bitboard(uint64 own, uint64 opp, int depth, int alpha, int beta, int side_is_red) {
-    int own_count = __popcll(own);
-    int opp_count = __popcll(opp);
+    if (own == 0) return 2000;
+    if (opp == 0) return -2000;
 
-    if (own_count == 0) return 2000;
-    if (opp_count == 0) return -2000;
-
-    if (depth <= 0 || (own_count + opp_count >= 64)) {
+    int total = __popcll(own | opp);
+    if (depth <= 0) {
         return evaluate_bitboard(side_is_red ? own : opp, side_is_red ? opp : own, side_is_red);
     }
 
     uint64 moves = get_moves(own, opp);
     if (moves == 0) {
-        uint64 opp_moves = get_moves(opp, own);
-        if (opp_moves == 0) {
+        if (get_moves(opp, own) == 0) {
             return evaluate_bitboard(side_is_red ? own : opp, side_is_red ? opp : own, side_is_red);
-        } else {
-            return -alphabeta_bitboard(opp, own, depth, -beta, -alpha, !side_is_red);
         }
+        return -alphabeta_bitboard(opp, own, depth, -beta, -alpha, !side_is_red);
     }
 
     int best_val = -INF - 1;
 
-    // Priority moves: corners
+    // Priority: Corners
     uint64 corners = moves & 0x8100000000000081ULL;
     while (corners) {
-        int bit = __ffsll(corners) - 1;
-        uint64 move = 1ULL << bit;
-        corners &= ~move;
-        moves &= ~move;
+        uint64 move = 1ULL << (__ffsll(corners) - 1);
+        corners ^= move;
+        moves ^= move;
 
-        uint64 next_own = own;
-        uint64 next_opp = opp;
+        uint64 next_own = own, next_opp = opp;
         make_move(next_own, next_opp, move);
-
         int val = -alphabeta_bitboard(next_opp, next_own, depth - 1, -beta, -alpha, !side_is_red);
         if (val > best_val) best_val = val;
         if (val > alpha) alpha = val;
         if (alpha >= beta) return alpha;
     }
 
+    // Regular moves
     while (moves) {
-        int bit = __ffsll(moves) - 1;
-        uint64 move = 1ULL << bit;
-        moves &= ~move;
+        uint64 move = 1ULL << (__ffsll(moves) - 1);
+        moves ^= move;
 
-        uint64 next_own = own;
-        uint64 next_opp = opp;
+        uint64 next_own = own, next_opp = opp;
         make_move(next_own, next_opp, move);
-
         int val = -alphabeta_bitboard(next_opp, next_own, depth - 1, -beta, -alpha, !side_is_red);
         if (val > best_val) best_val = val;
         if (val > alpha) alpha = val;
         if (alpha >= beta) return alpha;
     }
 
-    return best_val > -INF ? best_val : alpha;
+    return best_val;
 }
 
 extern "C" __global__
