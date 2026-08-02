@@ -20,13 +20,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Lazarus
-        uses: sxmxta/lazarus@v1
+        uses: sxmxta/lazarus@main
         with:
           lazarus-version: "4.8"
 
       - name: Build Lazarus Project
         run: |
-          lazbuild --cpu=x86_64 --os=win64 SumAntiReversi8x8.lpi
+          lazbuild --cpu=x86_64 --os=win64 --build-mode=Default SumAntiReversi8x8.lpi
 
       - name: Archive build artifacts
         uses: actions/upload-artifact@v4
