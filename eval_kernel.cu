@@ -1,3 +1,5 @@
+typedef unsigned long long uint64;
+
 __constant__ int c_posmark[100];
 
 #define INF 10000
@@ -5,157 +7,145 @@ __constant__ int c_posmark[100];
 // Helper to get value from transposed board
 #define GET_TRANSPOSED(pos, idx, num_boards) boards[(pos) * (num_boards) + (idx)]
 
-__device__ int evaluate_board_internal(const signed char board[100], int side_is_red) {
-    int red_score = 0;
-    int black_score = 0;
+// Safe shift macros for 8 directions
+#define SHIFT_R(x) (((x) << 1) & 0xfefefefefefefefeULL)
+#define SHIFT_L(x) (((x) >> 1) & 0x7f7f7f7f7f7f7f7fULL)
+#define SHIFT_D(x) ((x) << 8)
+#define SHIFT_U(x) ((x) >> 8)
+#define SHIFT_DR(x) (((x) << 9) & 0xfefefefefefefefeULL)
+#define SHIFT_DL(x) (((x) << 7) & 0x7f7f7f7f7f7f7f7fULL)
+#define SHIFT_UR(x) (((x) >> 7) & 0xfefefefefefefefeULL)
+#define SHIFT_UL(x) (((x) >> 9) & 0x7f7f7f7f7f7f7f7fULL)
 
-    for (int i = 1; i <= 8; ++i) {
-        for (int j = 1; j <= 8; ++j) {
-            int val = board[i * 10 + j];
-            if (val == 1) red_score++;
-            else if (val == -1) black_score++;
-        }
-    }
+__device__ __forceinline__ int get_piece_val(int bit, uint64 red, uint64 black) {
+    if (red & (1ULL << bit)) return 1;
+    if (black & (1ULL << bit)) return -1;
+    return 0;
+}
 
-    int result = 0;
-    if (red_score + black_score <= 59) {
-        result = black_score - red_score;
+__device__ __forceinline__ int evaluate_bitboard(uint64 red, uint64 black, int side_is_red) {
+    int red_score = __popcll(red);
+    int black_score = __popcll(black);
+    int total = red_score + black_score;
 
-        if (board[1 * 10 + 1] == 0)
-            result += (int)board[2 * 10 + 1] * c_posmark[2 * 10 + 1] + (int)board[1 * 10 + 2] * c_posmark[1 * 10 + 2];
+    if (total <= 59) {
+        int result = black_score - red_score;
+        uint64 occupied = red | black;
+
+        // Corner (1,1) -> bit 0
+        if (!(occupied & (1ULL << 0)))
+            result += get_piece_val(8, red, black) * c_posmark[21] + get_piece_val(1, red, black) * c_posmark[12];
         else
-            result += (int)board[1 * 10 + 1] * c_posmark[1 * 10 + 1];
+            result += get_piece_val(0, red, black) * c_posmark[11];
 
-        if (board[8 * 10 + 1] == 0)
-            result += (int)board[7 * 10 + 1] * c_posmark[7 * 10 + 1] + (int)board[8 * 10 + 2] * c_posmark[8 * 10 + 2];
+        // Corner (1,8) -> bit 7
+        if (!(occupied & (1ULL << 7)))
+            result += get_piece_val(6, red, black) * c_posmark[17] + get_piece_val(15, red, black) * c_posmark[28];
         else
-            result += (int)board[8 * 10 + 1] * c_posmark[8 * 10 + 1];
+            result += get_piece_val(7, red, black) * c_posmark[18];
 
-        if (board[1 * 10 + 8] == 0)
-            result += (int)board[1 * 10 + 7] * c_posmark[1 * 10 + 7] + (int)board[2 * 10 + 8] * c_posmark[2 * 10 + 8];
+        // Corner (8,1) -> bit 56
+        if (!(occupied & (1ULL << 56)))
+            result += get_piece_val(48, red, black) * c_posmark[71] + get_piece_val(57, red, black) * c_posmark[82];
         else
-            result += (int)board[1 * 10 + 8] * c_posmark[1 * 10 + 8];
+            result += get_piece_val(56, red, black) * c_posmark[81];
 
-        if (board[8 * 10 + 8] == 0)
-            result += (int)board[8 * 10 + 7] * c_posmark[8 * 10 + 7] + (int)board[7 * 10 + 8] * c_posmark[7 * 10 + 8];
+        // Corner (8,8) -> bit 63
+        if (!(occupied & (1ULL << 63)))
+            result += get_piece_val(62, red, black) * c_posmark[87] + get_piece_val(55, red, black) * c_posmark[78];
         else
-            result += (int)board[8 * 10 + 8] * c_posmark[8 * 10 + 8];
+            result += get_piece_val(63, red, black) * c_posmark[88];
 
-        if (!side_is_red) result = -result;
+        // Match Pascal: negate ONLY if not SideIsRed
+        return side_is_red ? result : -result;
     } else {
-        if (side_is_red) result = black_score - red_score;
-        else result = red_score - black_score;
+        // Match Pascal: endgame logic
+        return side_is_red ? (black_score - red_score) : (red_score - black_score);
     }
-    return result;
 }
 
-__device__ bool is_valid_move(const signed char board[100], int r, int c, int color) {
-    if (board[r * 10 + c] != 0) return false;
-    int opponent = -color;
+__device__ __forceinline__ uint64 get_moves(uint64 own, uint64 opp) {
+    uint64 moves = 0;
+    uint64 t;
+    uint64 empty = ~(own | opp);
 
-    for (int dr = -1; dr <= 1; dr++) {
-        for (int dc = -1; dc <= 1; dc++) {
-            if (dr == 0 && dc == 0) continue;
-            int nr = r + dr;
-            int nc = c + dc;
-            if (nr < 1 || nr > 8 || nc < 1 || nc > 8) continue;
-            if (board[nr * 10 + nc] == opponent) {
-                for (int d = 2; d < 8; d++) {
-                    int fr = r + dr * d;
-                    int fc = c + dc * d;
-                    if (fr < 1 || fr > 8 || fc < 1 || fc > 8) break;
-                    int val = board[fr * 10 + fc];
-                    if (val == 0) break;
-                    if (val == color) return true;
-                }
-            }
+#define DIR(SHIFT) \
+    t = SHIFT(own) & opp; \
+    t |= SHIFT(t) & opp; t |= SHIFT(t) & opp; t |= SHIFT(t) & opp; t |= SHIFT(t) & opp; t |= SHIFT(t) & opp; \
+    moves |= SHIFT(t) & empty;
+
+    DIR(SHIFT_R) DIR(SHIFT_L) DIR(SHIFT_D) DIR(SHIFT_U)
+    DIR(SHIFT_DR) DIR(SHIFT_DL) DIR(SHIFT_UR) DIR(SHIFT_UL)
+#undef DIR
+    return moves;
+}
+
+__device__ __forceinline__ void make_move(uint64& own, uint64& opp, uint64 move) {
+    uint64 flipped = 0;
+    uint64 t;
+    own |= move;
+
+#define DIR(SHIFT) \
+    t = SHIFT(move) & opp; \
+    t |= SHIFT(t) & opp; t |= SHIFT(t) & opp; t |= SHIFT(t) & opp; t |= SHIFT(t) & opp; t |= SHIFT(t) & opp; \
+    if (SHIFT(t) & own) flipped |= t;
+
+    DIR(SHIFT_R) DIR(SHIFT_L) DIR(SHIFT_D) DIR(SHIFT_U)
+    DIR(SHIFT_DR) DIR(SHIFT_DL) DIR(SHIFT_UR) DIR(SHIFT_UL)
+#undef DIR
+
+    own |= flipped;
+    opp &= ~flipped;
+}
+
+__device__ int alphabeta_bitboard(uint64 own, uint64 opp, int depth, int alpha, int beta, int side_is_red) {
+    if (own == 0) return 2000;
+    if (opp == 0) return -2000;
+
+    int total = __popcll(own | opp);
+    if (depth <= 0) {
+        return evaluate_bitboard(side_is_red ? own : opp, side_is_red ? opp : own, side_is_red);
+    }
+
+    uint64 moves = get_moves(own, opp);
+    if (moves == 0) {
+        if (get_moves(opp, own) == 0) {
+            return evaluate_bitboard(side_is_red ? own : opp, side_is_red ? opp : own, side_is_red);
         }
-    }
-    return false;
-}
-
-__device__ void apply_move(signed char board[100], int r, int c, int color) {
-    board[r * 10 + c] = color;
-    int opponent = -color;
-
-    for (int dr = -1; dr <= 1; dr++) {
-        for (int dc = -1; dc <= 1; dc++) {
-            if (dr == 0 && dc == 0) continue;
-            int nr = r + dr;
-            int nc = c + dc;
-            if (nr >= 1 && nr <= 8 && nc >= 1 && nc <= 8 && board[nr * 10 + nc] == opponent) {
-                for (int d = 2; d < 8; d++) {
-                    int fr = r + dr * d;
-                    int fc = c + dc * d;
-                    if (fr < 1 || fr > 8 || fc < 1 || fc > 8) break;
-                    int val = board[fr * 10 + fc];
-                    if (val == 0) break;
-                    if (val == color) {
-                        for (int k = 1; k < d; k++) {
-                            board[(r + dr * k) * 10 + (c + dc * k)] = color;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-    }
-}
-
-__device__ int alphabeta(signed char board[100], int depth, int alpha, int beta, int color, int side_is_red) {
-    int red_count = 0;
-    int black_count = 0;
-    for (int i = 0; i < 100; i++) {
-        if (board[i] == 1) red_count++;
-        else if (board[i] == -1) black_count++;
+        return -alphabeta_bitboard(opp, own, depth, -beta, -alpha, !side_is_red);
     }
 
-    if (red_count == 0) return side_is_red ? 2000 : -2000;
-    if (black_count == 0) return side_is_red ? -2000 : 2000;
-
-    if (depth <= 0 || (red_count + black_count > 63)) return evaluate_board_internal(board, side_is_red);
-
-    bool has_move = false;
     int best_val = -INF - 1;
 
-    for (int r = 1; r <= 8; r++) {
-        for (int c = 1; c <= 8; c++) {
-            if (is_valid_move(board, r, c, color)) {
-                has_move = true;
-                signed char next_board[100];
-                for (int i = 0; i < 100; i++) next_board[i] = board[i];
-                apply_move(next_board, r, c, color);
+    // Priority: Corners
+    uint64 corners = moves & 0x8100000000000081ULL;
+    while (corners) {
+        uint64 move = 1ULL << (__ffsll(corners) - 1);
+        corners ^= move;
+        moves ^= move;
 
-                int val = -alphabeta(next_board, depth - 1, -beta, -alpha, -color, !side_is_red);
-                if (val > best_val) best_val = val;
-                if (val > alpha) alpha = val;
-                if (alpha >= beta) return alpha;
-            }
-        }
+        uint64 next_own = own, next_opp = opp;
+        make_move(next_own, next_opp, move);
+        int val = -alphabeta_bitboard(next_opp, next_own, depth - 1, -beta, -alpha, !side_is_red);
+        if (val > best_val) best_val = val;
+        if (val > alpha) alpha = val;
+        if (alpha >= beta) return alpha;
     }
 
-    if (!has_move) {
-        // Pass
-        bool opponent_has_move = false;
-        for (int r = 1; r <= 8; r++) {
-            for (int c = 1; c <= 8; c++) {
-                if (is_valid_move(board, r, c, -color)) {
-                    opponent_has_move = true;
-                    break;
-                }
-            }
-            if (opponent_has_move) break;
-        }
+    // Regular moves
+    while (moves) {
+        uint64 move = 1ULL << (__ffsll(moves) - 1);
+        moves ^= move;
 
-        if (!opponent_has_move) {
-            return evaluate_board_internal(board, side_is_red);
-        } else {
-            // MATCH PASCAL: Do not decrease depth on pass
-            return -alphabeta(board, depth, -beta, -alpha, -color, !side_is_red);
-        }
+        uint64 next_own = own, next_opp = opp;
+        make_move(next_own, next_opp, move);
+        int val = -alphabeta_bitboard(next_opp, next_own, depth - 1, -beta, -alpha, !side_is_red);
+        if (val > best_val) best_val = val;
+        if (val > alpha) alpha = val;
+        if (alpha >= beta) return alpha;
     }
 
-    return best_val > -INF ? best_val : alpha;
+    return best_val;
 }
 
 extern "C" __global__
@@ -163,12 +153,16 @@ void evaluate_boards(const int* __restrict__ boards, int* __restrict__ results, 
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_boards) return;
 
-    signed char local_board[100];
-    for (int i = 0; i < 100; i++) {
-        local_board[i] = (signed char)GET_TRANSPOSED(i, idx, num_boards);
+    uint64 red = 0, black = 0;
+    for (int i = 0; i < 64; i++) {
+        int r = (i >> 3) + 1;
+        int c = (i & 7) + 1;
+        int val = GET_TRANSPOSED(r * 10 + c, idx, num_boards);
+        if (val == 1) red |= (1ULL << i);
+        else if (val == -1) black |= (1ULL << i);
     }
 
-    results[idx] = evaluate_board_internal(local_board, side_is_red);
+    results[idx] = evaluate_bitboard(red, black, side_is_red);
 }
 
 extern "C" __global__
@@ -176,10 +170,14 @@ void alphabeta_search(const int* __restrict__ boards, int* __restrict__ results,
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_boards) return;
 
-    signed char local_board[100];
-    for (int i = 0; i < 100; i++) {
-        local_board[i] = (signed char)GET_TRANSPOSED(i, idx, num_boards);
+    uint64 own = 0, opp = 0;
+    for (int i = 0; i < 64; i++) {
+        int r = (i >> 3) + 1;
+        int c = (i & 7) + 1;
+        int val = GET_TRANSPOSED(r * 10 + c, idx, num_boards);
+        if (val == color) own |= (1ULL << i);
+        else if (val == -color) opp |= (1ULL << i);
     }
 
-    results[idx] = alphabeta(local_board, depth, -INF, INF, color, side_is_red);
+    results[idx] = alphabeta_bitboard(own, opp, depth, -INF, INF, side_is_red);
 }
