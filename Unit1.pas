@@ -276,13 +276,14 @@ type
       function DetectCudaVersion(var Version: Integer): Boolean;
       procedure ToggleCuda(Enabled: Boolean; ShowErrors: Boolean);
     procedure HandleAIResult(const MoveName: string);
-    procedure SyncUpdateAIUI;
+    procedure UpdateAIUI;
     procedure CallSyncUpdateAIUI(const AScore, ATime, AThinkStep: string; AClear, AAppend: Boolean);
     { Private declarations }
   private
     FAIWasRed: Boolean;
-    FSyncScore, FSyncTime, FSyncThinkStep: string;
-    FSyncClearList, FSyncAppendList: Boolean;
+    FMetricsScore, FMetricsTime, FMetricsThinkStep: string;
+    FMetricsClear: Boolean;
+    FMetricsAppendList: TStringList;
     FAIThread: TAIThread;
     procedure StartAI(AComputerIsRed: Boolean);
     { Public declarations }
@@ -792,34 +793,71 @@ begin
   end;
 end;
 
-procedure TForm1.SyncUpdateAIUI;
+procedure TForm1.UpdateAIUI;
+var
+  LocalAppendList: TStringList;
+  LocalScore, LocalTime, LocalThinkStep: string;
+  LocalClear: Boolean;
+  i: Integer;
 begin
-  if FSyncClearList then AiListBox.Clear;
-  if FSyncScore <> '' then AIDisplayScoreLabel.Caption := FSyncScore;
-  if FSyncTime <> '' then AIUsedTimeLabel.Caption := FSyncTime;
-  if FSyncThinkStep <> '' then
-  begin
-    ThinkstepEdit.Text := FSyncThinkStep;
-    if FSyncAppendList then AiListBox.Items.Add(FSyncThinkStep);
+  LocalAppendList := TStringList.Create;
+  try
+    system.EnterCriticalSection(MyCriticalSection);
+    try
+      LocalScore := FMetricsScore;
+      LocalTime := FMetricsTime;
+      LocalThinkStep := FMetricsThinkStep;
+      LocalClear := FMetricsClear;
+      FMetricsClear := False;
+      FMetricsScore := '';
+      FMetricsTime := '';
+      FMetricsThinkStep := '';
+
+      LocalAppendList.Assign(FMetricsAppendList);
+      FMetricsAppendList.Clear;
+    finally
+      system.LeaveCriticalSection(MyCriticalSection);
+    end;
+
+    if LocalClear then AiListBox.Clear;
+    if LocalScore <> '' then AIDisplayScoreLabel.Caption := LocalScore;
+    if LocalTime <> '' then AIUsedTimeLabel.Caption := LocalTime;
+    if LocalThinkStep <> '' then
+    begin
+      ThinkstepEdit.Text := LocalThinkStep;
+    end;
+    if LocalAppendList.Count > 0 then
+    begin
+      AiListBox.Items.BeginUpdate;
+      try
+        for i := 0 to LocalAppendList.Count - 1 do
+          AiListBox.Items.Add(LocalAppendList[i]);
+      finally
+        AiListBox.Items.EndUpdate;
+      end;
+      // Scroll to bottom
+      AiListBox.ItemIndex := AiListBox.Items.Count - 1;
+    end;
+  finally
+    LocalAppendList.Free;
   end;
-  FSyncClearList := False;
-  FSyncAppendList := False;
-  FSyncScore := '';
-  FSyncTime := '';
-  FSyncThinkStep := '';
 end;
 
 procedure TForm1.CallSyncUpdateAIUI(const AScore, ATime, AThinkStep: string; AClear, AAppend: Boolean);
 begin
-  FSyncScore := AScore;
-  FSyncTime := ATime;
-  FSyncThinkStep := AThinkStep;
-  FSyncClearList := AClear;
-  FSyncAppendList := AAppend;
-  if GetCurrentThreadID = MainThreadID then
-    SyncUpdateAIUI
-  else
-    TThread.Synchronize(nil, SyncUpdateAIUI);
+  system.EnterCriticalSection(MyCriticalSection);
+  try
+    if AClear then FMetricsClear := True;
+    if AScore <> '' then FMetricsScore := AScore;
+    if ATime <> '' then FMetricsTime := ATime;
+    if AThinkStep <> '' then
+    begin
+      FMetricsThinkStep := AThinkStep;
+      if AAppend then FMetricsAppendList.Add(AThinkStep);
+    end;
+  finally
+    system.LeaveCriticalSection(MyCriticalSection);
+  end;
 end;
 
 procedure TForm1.StartAI(AComputerIsRed: Boolean);
@@ -841,6 +879,8 @@ begin
   FCudaFunc := nil;
   FCudaSearchFunc := nil;
   FGpuEvalCount := 0;
+  FMetricsAppendList := TStringList.Create;
+  Timer1.Interval := 100; // Faster updates for decoupled UI
 
   // Auto-detect and enable CUDA 12.6 or above
   if DetectCudaVersion(CudaVersion) then
@@ -1452,15 +1492,22 @@ end;
 
 procedure TForm1.Timer1Timer(Sender: TObject);
 begin
-  if FCudaEnabled then
-  begin
-    if FGpuEvalCount < 0 then
-      GpuEvalLabel.Caption := 'GPU ERROR!'
+  system.EnterCriticalSection(MyCriticalSection);
+  try
+    if FCudaEnabled then
+    begin
+      if FGpuEvalCount < 0 then
+        GpuEvalLabel.Caption := 'GPU ERROR!'
+      else
+        GpuEvalLabel.Caption := 'GPU Evals: ' + IntToStr(FGpuEvalCount);
+    end
     else
-      GpuEvalLabel.Caption := 'GPU Evals: ' + IntToStr(FGpuEvalCount);
-  end
-  else
-    GpuEvalLabel.Caption := 'GPU Disabled';
+      GpuEvalLabel.Caption := 'GPU Disabled';
+  finally
+    system.LeaveCriticalSection(MyCriticalSection);
+  end;
+
+  UpdateAIUI;
 end;
 
 procedure TForm1.AboutButtonClick(Sender: TObject);
@@ -2205,6 +2252,7 @@ begin
   Blacklist.Free;
 //  AiMoveList.Free;
   Movedlist.Free;
+  FMetricsAppendList.Free;
 end;
 
 procedure TForm1.HumanFirstButtonClick(Sender: TObject);
