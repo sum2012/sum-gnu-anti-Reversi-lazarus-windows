@@ -218,10 +218,10 @@ type
 //      mutistep:Boolean;
 //      mutiscore:Integer;
       mutidepth:integer;
-      mutitemplist:Tstringlist;
+      mutitemplist:TMoveArray;
       FParallelTasks: array of TParallelTask;
-      mutisteplist:Tstringlist;
-      mutiscorelist:Tstringlist;
+      mutisteplist:TMoveArray;
+      mutiscorelist:TMoveArray;
       mutiscores: array of Integer;
       mutiresults: array of TMoveArray;
       mutiSideisRed:Boolean;
@@ -870,9 +870,7 @@ end;
 procedure TForm1.FormCreate(Sender: TObject);
 var a,b,CudaVersion:integer;
 begin
-  mutitemplist := Tstringlist.Create;
-  mutisteplist := Tstringlist.Create;
-  mutiscorelist := Tstringlist.Create;
+  FCudaEnabled := False;
   FCudaEnabled := False;
   FCudaContext := nil;
   FCudaModule := nil;
@@ -926,33 +924,32 @@ begin
 end;
 function TForm1.Muti(const ComputerisRed:Boolean):String;
 function test(const depth:integer;const cuted:Boolean;const fullthink:boolean):string;
-var a,b,c,d,i,bestscore,cutnum:integer;templist,templist2:Tstringlist;OneDepthSideisRed:boolean;bestmove:string; move: TMoveArray;//cut:Boolean;
+var a,b,c,d,i,j,bestscore,cutnum, temp_idx, best_count:integer; templist, templist2: TMoveArray; OneDepthSideisRed:boolean; bestmove:string; move: TMoveArray;
+    sort_indices: array of Integer;
 begin
   Result := '';
-  templist := Tstringlist.Create;
-  templist2 := Tstringlist.Create;
+  templist.Count := 0;
+  templist2.Count := 0;
 if ComputerisRed = False then
 begin
   OneDepthSideisRed:=False;
-  if mutisteplist.count <> 0 then
+  if mutisteplist.Count <> 0 then
   begin
-    templist.AddStrings(mutisteplist);
-    //:= mutisteplist;
-    mutisteplist.clear;
+    templist := mutisteplist;
+    mutisteplist.Count := 0;
   end
   else
-  MakeBlackmove(board,templist);
+    FastMakeBlackMove(board, templist);
 end
 else begin
   OneDepthSideisRed:=True;
-  if mutisteplist.count <> 0 then
+  if mutisteplist.Count <> 0 then
   begin
-    templist.AddStrings(mutisteplist);
-//    templist := mutisteplist;
-    mutisteplist.clear;
+    templist := mutisteplist;
+    mutisteplist.Count := 0;
   end
   else
-    MakeRedmove(board,templist);
+    FastMakeRedMove(board, templist);
 end;
 
 mutiSideisRed := OneDepthSideisRed;
@@ -967,27 +964,27 @@ begin
    mutiBoard := board;
    if OneDepthSideisRed then
    begin
-     Redboardupdate(mutiBoard,strtoint(templist[a]));
-     MakeBlackmove(mutiBoard,templist2);
+     Redboardupdate(mutiBoard, templist.Moves[a]);
+     FastMakeBlackMove(mutiBoard, templist2);
    end
    else  begin
-     Blackboardupdate(mutiBoard,strtoint(templist[a]));
-     MakeRedmove(mutiBoard,templist2);
+     Blackboardupdate(mutiBoard, templist.Moves[a]);
+     FastMakeRedMove(mutiBoard, templist2);
    end;
 
-   if templist2.count = 0 then
+   if templist2.Count = 0 then
    begin
      SetLength(FParallelTasks, Length(FParallelTasks) + 1);
-     FParallelTasks[High(FParallelTasks)].Move1 := strtoint(templist[a]);
+     FParallelTasks[High(FParallelTasks)].Move1 := templist.Moves[a];
      FParallelTasks[High(FParallelTasks)].Move2 := -1; // PASS
      FParallelTasks[High(FParallelTasks)].Move1Idx := a;
    end
    else begin
      SetLength(FParallelTasks, Length(FParallelTasks) + templist2.Count);
-     for b:= 0 to templist2.count -1 do
+     for b:= 0 to templist2.Count - 1 do
      begin
-       FParallelTasks[Length(FParallelTasks) - templist2.Count + b].Move1 := strtoint(templist[a]);
-       FParallelTasks[Length(FParallelTasks) - templist2.Count + b].Move2 := strtoint(templist2[b]);
+       FParallelTasks[Length(FParallelTasks) - templist2.Count + b].Move1 := templist.Moves[a];
+       FParallelTasks[Length(FParallelTasks) - templist2.Count + b].Move2 := templist2.Moves[b];
        FParallelTasks[Length(FParallelTasks) - templist2.Count + b].Move1Idx := a;
      end;
    end;
@@ -1023,35 +1020,67 @@ begin
   CallSyncUpdateAIUI('', '', IntToStr(mutiscores[a])+':'+MoveArrayToThinkStep(mutiresults[a]), False, True);
 
  // Find all moves with the best score
- templist.Clear;
+ best_count := 0;
+ // Use a fixed-size array on the stack to avoid heap allocation
  for a := 0 to High(mutiscores) do
-   if mutiscores[a] = bestscore then
-     templist.Add(MoveArrayToThinkStep(mutiresults[a]));
+   if mutiscores[a] = bestscore then inc(best_count);
 
- a:=Random(templist.Count);
- bestmove := templist[a];
+ a := Random(best_count);
+ best_count := 0;
+ for j := 0 to High(mutiscores) do
+   if mutiscores[j] = bestscore then
+   begin
+     if best_count = a then
+     begin
+       move := mutiresults[j];
+       break;
+     end;
+     inc(best_count);
+   end;
+
+ bestmove := MoveArrayToThinkStep(move);
  CallSyncUpdateAIUI('', '', bestmove, False, False);
 
  if copy(bestmove, 1, 4) = 'PASS' then
    Result := ''
  else begin
-   b := strtoint(copy(bestmove, 3, 1)); // Row
-   c := strtoint(copy(bestmove, 1, 1)); // Col
-   Result := 'Image' + IntToStr(8*b + c - 8);
+   Result := 'Image' + IntToStr(move.Moves[0]);
  end;
  CallSyncUpdateAIUI(IntToStr(bestscore), '', '', False, False);
 end
 else begin
   // Aggressive filtering to match original performance
-  mutisteplist.Clear;
-  // Sort moves by score (descending)
+  mutisteplist.Count := 0;
+  // Sort moves by score (descending) - using index-based sort to avoid record copies
+  SetLength(sort_indices, templist.Count);
+  for a := 0 to templist.Count - 1 do sort_indices[a] := a;
+
   for a := 0 to templist.Count - 2 do
-    for b := a + 1 to templist.Count - 1 do
-      if mutiscores[b] > mutiscores[a] then
+    for j := a + 1 to templist.Count - 1 do
+      if mutiscores[sort_indices[j]] > mutiscores[sort_indices[a]] then
       begin
-        i := mutiscores[a]; mutiscores[a] := mutiscores[b]; mutiscores[b] := i;
-        move := mutiresults[a]; mutiresults[a] := mutiresults[b]; mutiresults[b] := move;
+        temp_idx := sort_indices[a];
+        sort_indices[a] := sort_indices[j];
+        sort_indices[j] := temp_idx;
       end;
+
+  // Reorder mutiscores and mutiresults based on sort_indices
+  for a := 0 to templist.Count - 1 do
+  begin
+    if sort_indices[a] <> a then
+    begin
+       // Only swap if needed
+       i := mutiscores[a]; mutiscores[a] := mutiscores[sort_indices[a]]; mutiscores[sort_indices[a]] := i;
+       move := mutiresults[a]; mutiresults[a] := mutiresults[sort_indices[a]]; mutiresults[sort_indices[a]] := move;
+       // Update sort_indices to track where the moved element went
+       for j := a + 1 to templist.Count - 1 do
+         if sort_indices[j] = a then
+         begin
+           sort_indices[j] := sort_indices[a];
+           break;
+         end;
+    end;
+  end;
 
   // Take only the moves that tied for the best score, then take top half of those
   i := 0;
@@ -1061,16 +1090,15 @@ else begin
   if i = 0 then i := 1;
 
   for a := 0 to i - 1 do
-    mutisteplist.Add(IntToStr(mutiresults[a].Moves[0]));
+  begin
+    mutisteplist.Moves[mutisteplist.Count] := mutiresults[a].Moves[0];
+    inc(mutisteplist.Count);
+  end;
 end;
-templist.free;
-templist2.free;
-mutitemplist.clear;
-mutiscorelist.clear;
-//mutitemplist.free;
-//mutiscorelist.free;
+mutitemplist.Count := 0;
+mutiscorelist.Count := 0;
 end;
-var a,b,c,tempdepth:integer; aibestmove: TMoveArray;
+var a,b,c,tempdepth:integer; aibestmove, move: TMoveArray;
 begin
   Result := '';
   if FCudaEnabled then
@@ -1094,17 +1122,10 @@ begin
   end;
 //  mutisteplist := Tstringlist.Create;
 
-    if ComputerIsRed = true then
-  begin
-      MakeRedMove(board,redlist);
-     c:= redlist.Count;
-     redlist.clear;
-  end
-  else begin
-    MakeBlackMove(board,blacklist);
-    c:= blacklist.Count;
-    blacklist.clear;
-  end;
+  if ComputerIsRed then FastMakeRedMove(board, move)
+  else FastMakeBlackMove(board, move);
+  c := move.Count;
+
   score(board,a,b);
   tempdepth:= strToint(Endgamedepth.text);
   if a+b + tempdepth > 64 then
@@ -1114,21 +1135,16 @@ begin
 
   if (c >= 4) and (a + b < 46)  then
   begin
-  //nornally  tempdepth:= strtoint(NornalDepth.text)-2;
     tempdepth:= tempdepth-4;
     test(tempdepth,true,false);
-    // use mutisteplist to store cuted step
     tempdepth:= tempdepth + 2;
-//    tempdepth:= strtoint(NornalDepth.text)-2;
     Result:=test(tempdepth,false,false);
   end
   else begin
     tempdepth := tempdepth - 2;
-//    tempdepth:= strtoint(NornalDepth.text)-2;
     Result:=test(tempdepth,true,True);
   end;
-  mutisteplist.clear;
-//  mutisteplist.free;
+  mutisteplist.Count := 0;
 end;
 
 
@@ -1532,9 +1548,6 @@ end;
 
 procedure TForm1.FormClose(Sender: TObject; var CloseAction: TCloseAction);
 begin
- mutitemplist.free;
- mutisteplist.free;
- mutiscorelist.free;
   system.DoneCriticalSection(MyCriticalSection);
 end;
 
@@ -1924,13 +1937,12 @@ var
 begin
   temp.Count := 0;
   moves := GetBoardMoves(aBoard.Red, aBoard.Black);
-  for bit := 0 to 63 do
+  while moves <> 0 do
   begin
-    if (moves and (UInt64(1) shl bit)) <> 0 then
-    begin
-      temp.Moves[temp.Count] := bit + 1;
-      inc(temp.Count);
-    end;
+    bit := BsfQWord(moves);
+    temp.Moves[temp.Count] := bit + 1;
+    inc(temp.Count);
+    moves := moves and not (UInt64(1) shl bit);
   end;
 end;
 
@@ -1941,13 +1953,12 @@ var
 begin
   temp.Count := 0;
   moves := GetBoardMoves(aBoard.Black, aBoard.Red);
-  for bit := 0 to 63 do
+  while moves <> 0 do
   begin
-    if (moves and (UInt64(1) shl bit)) <> 0 then
-    begin
-      temp.Moves[temp.Count] := bit + 1;
-      inc(temp.Count);
-    end;
+    bit := BsfQWord(moves);
+    temp.Moves[temp.Count] := bit + 1;
+    inc(temp.Count);
+    moves := moves and not (UInt64(1) shl bit);
   end;
 end;
 
