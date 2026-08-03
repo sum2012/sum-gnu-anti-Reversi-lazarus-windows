@@ -28,7 +28,7 @@ uses
 
 const
   inf = 10000;
-  TT_SIZE = 1 shl 28;
+  TT_SIZE = 1 shl 24;
   TT_EXACT = 0;
   TT_LOWERBOUND = 1;
   TT_UPPERBOUND = 2;
