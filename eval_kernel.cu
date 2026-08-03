@@ -3,6 +3,7 @@ typedef unsigned long long uint64;
 struct Tboard {
     uint64 red;
     uint64 black;
+    uint64 hash;
 };
 
 __constant__ int c_posmark[100];

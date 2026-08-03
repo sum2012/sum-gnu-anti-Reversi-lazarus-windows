@@ -460,15 +460,24 @@ end;
 procedure TForm1.StoreTT(Hash: UInt64; Depth, Value, Flag, BestMove: Integer);
 var
   Index: Cardinal;
+  DataSignature: UInt64;
 begin
-  Index := Hash mod TT_SIZE;
+  Index := Hash and (TT_SIZE - 1);
+  // Depth-preferred replacement
   if (FTranspositionTable[Index].Hash = 0) or (FTranspositionTable[Index].Depth <= Depth) then
   begin
-    FTranspositionTable[Index].Hash := Hash;
+    // Create a signature of the data fields to detect torn reads in a lockless environment
+    DataSignature := UInt64(Value) xor (UInt64(Depth) shl 32) xor
+                     (UInt64(Flag) shl 40) xor (UInt64(BestMove) shl 48);
+
+    // Write data fields first
     FTranspositionTable[Index].Value := Value;
     FTranspositionTable[Index].Depth := Depth;
     FTranspositionTable[Index].Flag := Flag;
     FTranspositionTable[Index].BestMove := BestMove;
+
+    // Store the XORed key last. This acts as a checksum.
+    FTranspositionTable[Index].Hash := Hash xor DataSignature;
   end;
 end;
 
@@ -476,11 +485,21 @@ function TForm1.LookupTT(Hash: UInt64; Depth, Alpha, Beta: Integer; var Value, B
 var
   Index: Cardinal;
   Entry: TTranspositionEntry;
+  DataSignature: UInt64;
 begin
   Result := False;
-  Index := Hash mod TT_SIZE;
+  Index := Hash and (TT_SIZE - 1);
+
+  // Read the entire entry into a local copy. This might be a "torn read"
+  // if another thread is writing to it simultaneously.
   Entry := FTranspositionTable[Index];
-  if Entry.Hash = Hash then
+
+  // Reconstruct the signature from the data we just read
+  DataSignature := UInt64(Entry.Value) xor (UInt64(Entry.Depth) shl 32) xor
+                   (UInt64(Entry.Flag) shl 40) xor (UInt64(Entry.BestMove) shl 48);
+
+  // If (StoredHash XOR ReconstructedSignature) matches our search Hash, the read was valid.
+  if (Entry.Hash xor DataSignature) = Hash then
   begin
     BestMove := Entry.BestMove;
     if Entry.Depth >= Depth then
