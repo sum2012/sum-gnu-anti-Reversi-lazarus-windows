@@ -28,6 +28,19 @@ uses
 
 const
   inf = 10000;
+  TT_SIZE = 1 shl 20;
+  TT_EXACT = 0;
+  TT_LOWERBOUND = 1;
+  TT_UPPERBOUND = 2;
+
+type
+  TTranspositionEntry = record
+    Hash: UInt64;
+    Value: Integer;
+    Depth: Integer;
+    Flag: Integer;
+    BestMove: Integer;
+  end;
 
 
 
@@ -246,6 +259,13 @@ type
       FGpuEvalCount: Int64;
       FGpuBoardsBuf, FGpuResultsBuf, FGpuPosMarkBuf, FGpuTransposedBuf: CUdeviceptr;
       FGpuBufSize: NativeUInt;
+      FZobristRed: array[0..63] of UInt64;
+      FZobristBlack: array[0..63] of UInt64;
+      FTranspositionTable: array of TTranspositionEntry;
+      procedure InitializeZobrist;
+      function CalculateHash(const ABoard: Tboard): UInt64;
+      procedure StoreTT(Hash: UInt64; Depth, Value, Flag, BestMove: Integer);
+      function LookupTT(Hash: UInt64; Depth, Alpha, Beta: Integer; var Value, BestMove: Integer): Boolean;
       procedure FastMakeRedMove(const ABoard:Tboard; var temp:TMoveArray);
       procedure FastMakeBlackMove(const ABoard:Tboard; var temp:TMoveArray);
       function Muti(const ComputerisRed:Boolean):string;
@@ -380,6 +400,105 @@ var
 implementation
 
 {$R *.lfm}
+
+procedure TForm1.InitializeZobrist;
+var
+  i: Integer;
+  function Random64: UInt64;
+  begin
+    Result := (UInt64(Random($FFFF)) shl 48) or (UInt64(Random($FFFF)) shl 32) or
+              (UInt64(Random($FFFF)) shl 16) or UInt64(Random($FFFF));
+  end;
+begin
+  for i := 0 to 63 do
+  begin
+    FZobristRed[i] := Random64;
+    FZobristBlack[i] := Random64;
+  end;
+  SetLength(FTranspositionTable, TT_SIZE);
+  for i := 0 to TT_SIZE - 1 do
+  begin
+    FTranspositionTable[i].Hash := 0;
+    FTranspositionTable[i].BestMove := -2;
+  end;
+end;
+
+function TForm1.CalculateHash(const ABoard: Tboard): UInt64;
+var
+  i: Integer;
+  Red, Black: UInt64;
+begin
+  Result := 0;
+  Red := ABoard.Red;
+  Black := ABoard.Black;
+  while Red <> 0 do
+  begin
+    i := BsfQWord(Red);
+    Result := Result xor FZobristRed[i];
+    Red := Red and not (UInt64(1) shl i);
+  end;
+  while Black <> 0 do
+  begin
+    i := BsfQWord(Black);
+    Result := Result xor FZobristBlack[i];
+    Black := Black and not (UInt64(1) shl i);
+  end;
+end;
+
+procedure TForm1.StoreTT(Hash: UInt64; Depth, Value, Flag, BestMove: Integer);
+var
+  Index: Cardinal;
+begin
+  Index := Hash mod TT_SIZE;
+  if (FTranspositionTable[Index].Hash = 0) or (FTranspositionTable[Index].Depth <= Depth) then
+  begin
+    FTranspositionTable[Index].Hash := Hash;
+    FTranspositionTable[Index].Value := Value;
+    FTranspositionTable[Index].Depth := Depth;
+    FTranspositionTable[Index].Flag := Flag;
+    FTranspositionTable[Index].BestMove := BestMove;
+  end;
+end;
+
+function TForm1.LookupTT(Hash: UInt64; Depth, Alpha, Beta: Integer; var Value, BestMove: Integer): Boolean;
+var
+  Index: Cardinal;
+  Entry: TTranspositionEntry;
+begin
+  Result := False;
+  Index := Hash mod TT_SIZE;
+  Entry := FTranspositionTable[Index];
+  if Entry.Hash = Hash then
+  begin
+    BestMove := Entry.BestMove;
+    if Entry.Depth >= Depth then
+    begin
+      case Entry.Flag of
+        TT_EXACT:
+        begin
+          Value := Entry.Value;
+          Exit(True);
+        end;
+        TT_LOWERBOUND:
+        begin
+          if Entry.Value >= Beta then
+          begin
+            Value := Entry.Value;
+            Exit(True);
+          end;
+        end;
+        TT_UPPERBOUND:
+        begin
+          if Entry.Value <= Alpha then
+          begin
+            Value := Entry.Value;
+            Exit(True);
+          end;
+        end;
+      end;
+    end;
+  end;
+end;
 
 procedure TForm1.FastScoresort(var moves: TMoveArray; var scores: array of Integer);
 var
@@ -892,7 +1011,8 @@ begin
   end;
 
   system.InitCriticalSection(MyCriticalSection);
- randomize;
+  randomize;
+  InitializeZobrist;
 //  RedMove:=True;
   Initboard.Red := 0;
   Initboard.Black := 0;
@@ -1605,10 +1725,12 @@ begin
 end;
 
 function TForm1.MutiMinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
-var a,b,c,d,bestvalue, value:integer; moves: TMoveArray; tempboard:Tboard;
+var a,b,c,d,bestvalue, value, best_a_move, oldAlpha:integer; moves: TMoveArray; tempboard:Tboard;
     scores: array[0..63] of Integer;
     best_paths: array of TMoveArray;
     current_path, oldaithinkstep: TMoveArray;
+    h: UInt64;
+    tt_value, tt_best_move: Integer;
 begin
   Score(Aboard,a,b);
   if a = 0 then
@@ -1621,6 +1743,19 @@ begin
     if SideIsRed then Result := -2000 else Result := 2000;
     exit;
   end;
+
+  h := CalculateHash(Aboard);
+  oldAlpha := alpha;
+  if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
+  begin
+    if (tt_best_move <> -2) and (tt_best_move <> -1) then
+    begin
+       aithinkstep.Moves[aithinkstep.Count] := tt_best_move;
+       inc(aithinkstep.Count);
+    end;
+    Exit(tt_value);
+  end;
+
   if (depth<=0) or (a+b>63) then
   begin
     Result := EvaluateScore(Aboard, SideIsRed);
@@ -1665,9 +1800,21 @@ begin
       for a := 0 to moves.Count - 1 do
         scores[a] := GetMoveHeuristic(moves.Moves[a], SideIsRed);
     end;
+
+    if (tt_best_move <> -2) and (tt_best_move <> -1) then
+    begin
+       for a := 0 to moves.Count - 1 do
+         if moves.Moves[a] = tt_best_move then
+         begin
+            scores[a] := 1000000;
+            break;
+         end;
+    end;
+
     FastScoresort(moves, scores);
   end;
 
+  best_a_move := -2;
   for a := 0 to moves.Count div 2 do
   begin
     Aboard := tempboard;
@@ -1682,6 +1829,7 @@ begin
     if value > bestvalue then
     begin
       bestvalue := value;
+      best_a_move := moves.Moves[a];
       if value > alpha then alpha := value;
       SetLength(best_paths, 1);
       best_paths[0] := current_path;
@@ -1693,6 +1841,13 @@ begin
     end;
     if alpha >= beta then break;
   end;
+
+  if bestvalue <= oldAlpha then
+    StoreTT(h, depth, bestvalue, TT_UPPERBOUND, best_a_move)
+  else if bestvalue >= beta then
+    StoreTT(h, depth, bestvalue, TT_LOWERBOUND, best_a_move)
+  else
+    StoreTT(h, depth, bestvalue, TT_EXACT, best_a_move);
 
   if Length(best_paths) > 0 then
   begin
@@ -1714,6 +1869,8 @@ var
   l_oldaithinkstep, l_bestaithinkstep: TMoveArray;
   l_tempboard, l_tempboard2: Tboard;
   l_scores: array[0..63] of Integer;
+  h: UInt64;
+  oldAlpha, l_best_move, tt_best_move, tt_value: Integer;
 
   function DoGPUBatching: Boolean;
   type
@@ -1846,6 +2003,18 @@ begin
     exit;
   end;
 
+  h := CalculateHash(Aboard);
+  oldAlpha := alpha;
+  if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
+  begin
+    if (tt_best_move <> -2) and (tt_best_move <> -1) then
+    begin
+       aithinkstep.Moves[aithinkstep.Count] := tt_best_move;
+       inc(aithinkstep.Count);
+    end;
+    Exit(tt_value);
+  end;
+
   if (depth = 6) and FCudaEnabled then
   begin
     if DoGPUBatching then
@@ -1878,7 +2047,9 @@ begin
     l_oldaithinkstep := aithinkstep;
     aithinkstep.Moves[aithinkstep.Count] := -1; // PASS
     inc(aithinkstep.Count);
-    Result := -MutiMinMax(Aboard, Not SideIsRed, depth, -beta, -alpha, aithinkstep);
+    l_value := -MutiMinMax(Aboard, Not SideIsRed, depth, -beta, -alpha, aithinkstep);
+    StoreTT(h, depth, l_value, TT_EXACT, -1);
+    Result := l_value;
     exit;
   end;
 
@@ -1903,9 +2074,21 @@ begin
       for i := 0 to l_moves.Count - 1 do
         l_scores[i] := GetMoveHeuristic(l_moves.Moves[i], SideIsRed);
     end;
+
+    if (tt_best_move <> -2) and (tt_best_move <> -1) then
+    begin
+       for i := 0 to l_moves.Count - 1 do
+         if l_moves.Moves[i] = tt_best_move then
+         begin
+            l_scores[i] := 1000000;
+            break;
+         end;
+    end;
+
     FastScoresort(l_moves, l_scores);
   end;
 
+  l_best_move := -2;
   for i := 0 to l_moves.Count - 1 do
   begin
     aithinkstep := l_oldaithinkstep;
@@ -1921,11 +2104,20 @@ begin
     if l_value > l_bestvalue then
     begin
       l_bestvalue := l_value;
+      l_best_move := l_moves.Moves[i];
       if l_value > alpha then alpha := l_value;
       l_bestaithinkstep := aithinkstep;
     end;
     if alpha >= beta then break;
   end;
+
+  if l_bestvalue <= oldAlpha then
+    StoreTT(h, depth, l_bestvalue, TT_UPPERBOUND, l_best_move)
+  else if l_bestvalue >= beta then
+    StoreTT(h, depth, l_bestvalue, TT_LOWERBOUND, l_best_move)
+  else
+    StoreTT(h, depth, l_bestvalue, TT_EXACT, l_best_move);
+
   aithinkstep := l_bestaithinkstep;
   Result := l_bestvalue;
 end;
@@ -3589,10 +3781,12 @@ end;
 
 
 function TForm1.MinMaxRandom(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
-var a,b,c,d,bestvalue, value:integer; moves: TMoveArray; tempboard:Tboard;
+var a,b,c,d,bestvalue, value, best_a_move, oldAlpha:integer; moves: TMoveArray; tempboard:Tboard;
     oldaithinkstep, bestaithinkstep: TMoveArray;
     aithinksteplist: array of TMoveArray;
     scores: array[0..63] of Integer;
+    h: UInt64;
+    tt_value, tt_best_move: Integer;
 begin
 //一般來說，這裡有一個判斷棋局是否結束的函數，
 //一旦棋局結束就不必繼續搜索了，直接返回極值。
@@ -3615,6 +3809,19 @@ begin
       result:= 2000;
     exit;
   end;
+
+  h := CalculateHash(Aboard);
+  oldAlpha := alpha;
+  if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
+  begin
+    if (tt_best_move <> -2) and (tt_best_move <> -1) then
+    begin
+       aithinkstep.Moves[aithinkstep.Count] := tt_best_move;
+       inc(aithinkstep.Count);
+    end;
+    Exit(tt_value);
+  end;
+
   if (depth <= 0) or (a + b > 63) then
   begin
     Result := EvaluateScore(Aboard, SideIsRed);
@@ -3642,6 +3849,17 @@ begin
       for a := 0 to moves.Count - 1 do
         scores[a] := GetMoveHeuristic(moves.Moves[a], SideIsRed);
     end;
+
+    if (tt_best_move <> -2) and (tt_best_move <> -1) then
+    begin
+       for a := 0 to moves.Count - 1 do
+         if moves.Moves[a] = tt_best_move then
+         begin
+            scores[a] := 1000000;
+            break;
+         end;
+    end;
+
     FastScoresort(moves, scores);
   end;
 
@@ -3655,7 +3873,9 @@ begin
       Result := EvaluateScore(Aboard, SideIsRed);
       exit;
     end;
-    Result := -MinMax(Aboard, Not SideIsRed, depth, -beta, -alpha, aithinkstep);
+    value := -MinMax(Aboard, Not SideIsRed, depth, -beta, -alpha, aithinkstep);
+    StoreTT(h, depth, value, TT_EXACT, -1);
+    Result := value;
     exit;
   end;
 
@@ -3680,11 +3900,22 @@ begin
     if value > bestvalue then
     begin
       bestvalue := value;
+      best_a_move := moves.Moves[a];
       if value > alpha then alpha := value;
       bestaithinkstep := aithinkstep;
     end;
 
     if alpha >= beta then break;
+  end;
+
+  if best_a_move <> -2 then
+  begin
+    if bestvalue <= oldAlpha then
+      StoreTT(h, depth, bestvalue, TT_UPPERBOUND, best_a_move)
+    else if bestvalue >= beta then
+      StoreTT(h, depth, bestvalue, TT_LOWERBOUND, best_a_move)
+    else
+      StoreTT(h, depth, bestvalue, TT_EXACT, best_a_move);
   end;
 
   aithinkstep := bestaithinkstep;
@@ -3699,6 +3930,8 @@ var a,b,c,d,bestvalue, value, b_pos, c_pos, node_val, branch_best, best_a_move:i
     batch_boards: array of Tboard;
     batch_scores: array of Integer;
     scores: array[0..63] of Integer;
+    h: UInt64;
+    oldAlpha, tt_value, tt_best_move: Integer;
 begin
   bestaithinkstep:=aithinkstep;
   Score(Aboard,a,b);
@@ -3718,6 +3951,19 @@ begin
       result:= 2000;
     exit;
   end;
+
+  h := CalculateHash(Aboard);
+  oldAlpha := alpha;
+  if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
+  begin
+    if (tt_best_move <> -2) and (tt_best_move <> -1) then
+    begin
+       aithinkstep.Moves[aithinkstep.Count] := tt_best_move;
+       inc(aithinkstep.Count);
+    end;
+    Exit(tt_value);
+  end;
+
   // x25 Power Boost: High-Performance GPU Subtree Evaluation at Depth 6
   if (depth=6) and FCudaEnabled then
   begin
@@ -3834,6 +4080,17 @@ begin
       for a := 0 to moves.Count - 1 do
         scores[a] := GetMoveHeuristic(moves.Moves[a], SideIsRed);
     end;
+
+    if (tt_best_move <> -2) and (tt_best_move <> -1) then
+    begin
+       for a := 0 to moves.Count - 1 do
+         if moves.Moves[a] = tt_best_move then
+         begin
+            scores[a] := 1000000;
+            break;
+         end;
+    end;
+
     FastScoresort(moves, scores);
   end;
 
@@ -3850,12 +4107,15 @@ begin
     oldaithinkstep := aithinkstep;
     aithinkstep.Moves[aithinkstep.Count] := -1; // PASS
     inc(aithinkstep.Count);
-    Result := -MinMax(Aboard, Not SideIsRed, depth, -beta, -alpha, aithinkstep);
+    value := -MinMax(Aboard, Not SideIsRed, depth, -beta, -alpha, aithinkstep);
+    StoreTT(h, depth, value, TT_EXACT, -1);
+    Result := value;
     exit;
   end;
 
   tempboard := Aboard;
   oldaithinkstep := aithinkstep;
+  best_a_move := -2;
   for a := 0 to moves.Count - 1 do
   begin
     aithinkstep := oldaithinkstep;
@@ -3871,11 +4131,20 @@ begin
     if value > bestvalue then
     begin
       bestvalue := value;
+      best_a_move := moves.Moves[a];
       if value > alpha then alpha := value;
       bestaithinkstep := aithinkstep;
     end;
     if alpha >= beta then break;
   end;
+
+  if bestvalue <= oldAlpha then
+    StoreTT(h, depth, bestvalue, TT_UPPERBOUND, best_a_move)
+  else if bestvalue >= beta then
+    StoreTT(h, depth, bestvalue, TT_LOWERBOUND, best_a_move)
+  else
+    StoreTT(h, depth, bestvalue, TT_EXACT, best_a_move);
+
   aithinkstep := bestaithinkstep;
   Result := bestvalue;
 end;
@@ -3995,10 +4264,12 @@ end;
 
 
 function TForm1.MinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
-var a,b,c,d,bestvalue, value:integer; moves: TMoveArray; tempboard:Tboard;
+var a,b,c,d,bestvalue, value, best_a_move, oldAlpha:integer; moves: TMoveArray; tempboard:Tboard;
     scores: array[0..63] of Integer;
     best_paths: array of TMoveArray;
     current_path: TMoveArray;
+    h: UInt64;
+    tt_value, tt_best_move: Integer;
 begin
   Score(Aboard,a,b);
   if a = 0 then
@@ -4017,6 +4288,19 @@ begin
       result:= 2000;
     exit;
   end;
+
+  h := CalculateHash(Aboard);
+  oldAlpha := alpha;
+  if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
+  begin
+    if (tt_best_move <> -2) and (tt_best_move <> -1) then
+    begin
+       aithinkstep.Moves[aithinkstep.Count] := tt_best_move;
+       inc(aithinkstep.Count);
+    end;
+    Exit(tt_value);
+  end;
+
   if (depth <= 0) or (a + b > 63) then //葉子節點
   begin
     Result := EvaluateScore(Aboard, SideIsRed);
@@ -4044,6 +4328,17 @@ begin
       for a := 0 to moves.Count - 1 do
         scores[a] := GetMoveHeuristic(moves.Moves[a], SideIsRed);
     end;
+
+    if (tt_best_move <> -2) and (tt_best_move <> -1) then
+    begin
+       for a := 0 to moves.Count - 1 do
+         if moves.Moves[a] = tt_best_move then
+         begin
+            scores[a] := 1000000;
+            break;
+         end;
+    end;
+
     FastScoresort(moves, scores);
   end;
 
@@ -4083,6 +4378,7 @@ begin
     if value > bestvalue then
     begin
       bestvalue := value;
+      best_a_move := moves.Moves[a];
       if value > alpha then alpha := value;
       SetLength(best_paths, 1);
       best_paths[0] := current_path;
@@ -4092,6 +4388,16 @@ begin
       SetLength(best_paths, Length(best_paths) + 1);
       best_paths[High(best_paths)] := current_path;
     end;
+  end;
+
+  if best_a_move <> -2 then
+  begin
+    if bestvalue <= oldAlpha then
+      StoreTT(h, depth, bestvalue, TT_UPPERBOUND, best_a_move)
+    else if bestvalue >= beta then
+      StoreTT(h, depth, bestvalue, TT_LOWERBOUND, best_a_move)
+    else
+      StoreTT(h, depth, bestvalue, TT_EXACT, best_a_move);
   end;
 
   if Length(best_paths) > 0 then
