@@ -28,7 +28,7 @@ uses
 
 const
   inf = 10000;
-  TT_SIZE = 1 shl 23;
+  TT_SIZE = 1 shl 28;
   TT_EXACT = 0;
   TT_LOWERBOUND = 1;
   TT_UPPERBOUND = 2;
@@ -49,6 +49,7 @@ type
   Tboard = record
     Red: UInt64;
     Black: UInt64;
+    Hash: UInt64;
   end;
   TArrayBoard = array[0..9, 0..9] of Integer;
   Tmovelist = array[1..20] of integer;
@@ -261,9 +262,11 @@ type
       FGpuBufSize: NativeUInt;
       FZobristRed: array[0..63] of UInt64;
       FZobristBlack: array[0..63] of UInt64;
+      FZobristSide: UInt64;
       FTranspositionTable: array of TTranspositionEntry;
       procedure InitializeZobrist;
       function CalculateHash(const ABoard: Tboard): UInt64;
+      procedure UpdateHash(var AHash: UInt64; PieceIdx: Integer; PieceType: Integer); // PieceType: 1=Red, -1=Black, 0=Remove/Toggle
       procedure StoreTT(Hash: UInt64; Depth, Value, Flag, BestMove: Integer);
       function LookupTT(Hash: UInt64; Depth, Alpha, Beta: Integer; var Value, BestMove: Integer): Boolean;
       procedure FastMakeRedMove(const ABoard:Tboard; var temp:TMoveArray);
@@ -415,12 +418,21 @@ begin
     FZobristRed[i] := Random64;
     FZobristBlack[i] := Random64;
   end;
+  FZobristSide := Random64;
   SetLength(FTranspositionTable, TT_SIZE);
   for i := 0 to TT_SIZE - 1 do
   begin
     FTranspositionTable[i].Hash := 0;
     FTranspositionTable[i].BestMove := -2;
   end;
+end;
+
+procedure TForm1.UpdateHash(var AHash: UInt64; PieceIdx: Integer; PieceType: Integer);
+begin
+  if PieceType = 1 then
+    AHash := AHash xor FZobristRed[PieceIdx]
+  else if PieceType = -1 then
+    AHash := AHash xor FZobristBlack[PieceIdx];
 end;
 
 function TForm1.CalculateHash(const ABoard: Tboard): UInt64;
@@ -671,11 +683,11 @@ begin
   Result := Result or ((t shr 9) and empty and $7F7F7F7F7F7F7F7F);
 end;
 
-procedure ApplyBoardMove(var Own, Opp: UInt64; Move: UInt64);
+procedure ApplyBoardMove(var Own, Opp: UInt64; Move: UInt64; out Flipped: UInt64);
 var
-  flipped, t: UInt64;
+  t: UInt64;
 begin
-  flipped := 0;
+  Flipped := 0;
   Own := Own or Move;
 
   // Right
@@ -685,7 +697,7 @@ begin
   t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
   t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
   t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
-  if ((t shl 1) and Own and $FEFEFEFEFEFEFEFE) <> 0 then flipped := flipped or t;
+  if ((t shl 1) and Own and $FEFEFEFEFEFEFEFE) <> 0 then Flipped := Flipped or t;
 
   // Left
   t := (Move shr 1) and Opp and $7F7F7F7F7F7F7F7F;
@@ -694,7 +706,7 @@ begin
   t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
   t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
   t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
-  if ((t shr 1) and Own and $7F7F7F7F7F7F7F7F) <> 0 then flipped := flipped or t;
+  if ((t shr 1) and Own and $7F7F7F7F7F7F7F7F) <> 0 then Flipped := Flipped or t;
 
   // Down
   t := (Move shl 8) and Opp;
@@ -703,7 +715,7 @@ begin
   t := t or ((t shl 8) and Opp);
   t := t or ((t shl 8) and Opp);
   t := t or ((t shl 8) and Opp);
-  if ((t shl 8) and Own) <> 0 then flipped := flipped or t;
+  if ((t shl 8) and Own) <> 0 then Flipped := Flipped or t;
 
   // Up
   t := (Move shr 8) and Opp;
@@ -712,7 +724,7 @@ begin
   t := t or ((t shr 8) and Opp);
   t := t or ((t shr 8) and Opp);
   t := t or ((t shr 8) and Opp);
-  if ((t shr 8) and Own) <> 0 then flipped := flipped or t;
+  if ((t shr 8) and Own) <> 0 then Flipped := Flipped or t;
 
   // Down-Right
   t := (Move shl 9) and Opp and $FEFEFEFEFEFEFEFE;
@@ -721,7 +733,7 @@ begin
   t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
   t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
   t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
-  if ((t shl 9) and Own and $FEFEFEFEFEFEFEFE) <> 0 then flipped := flipped or t;
+  if ((t shl 9) and Own and $FEFEFEFEFEFEFEFE) <> 0 then Flipped := Flipped or t;
 
   // Down-Left
   t := (Move shl 7) and Opp and $7F7F7F7F7F7F7F7F;
@@ -730,7 +742,7 @@ begin
   t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
   t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
   t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
-  if ((t shl 7) and Own and $7F7F7F7F7F7F7F7F) <> 0 then flipped := flipped or t;
+  if ((t shl 7) and Own and $7F7F7F7F7F7F7F7F) <> 0 then Flipped := Flipped or t;
 
   // Up-Right
   t := (Move shr 7) and Opp and $FEFEFEFEFEFEFEFE;
@@ -739,7 +751,7 @@ begin
   t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
   t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
   t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
-  if ((t shr 7) and Own and $FEFEFEFEFEFEFEFE) <> 0 then flipped := flipped or t;
+  if ((t shr 7) and Own and $FEFEFEFEFEFEFEFE) <> 0 then Flipped := Flipped or t;
 
   // Up-Left
   t := (Move shr 9) and Opp and $7F7F7F7F7F7F7F7F;
@@ -748,10 +760,10 @@ begin
   t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
   t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
   t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
-  if ((t shr 9) and Own and $7F7F7F7F7F7F7F7F) <> 0 then flipped := flipped or t;
+  if ((t shr 9) and Own and $7F7F7F7F7F7F7F7F) <> 0 then Flipped := Flipped or t;
 
-  Own := Own or flipped;
-  Opp := Opp and (not flipped);
+  Own := Own or Flipped;
+  Opp := Opp and (not Flipped);
 end;
 
 type
@@ -1016,8 +1028,10 @@ begin
 //  RedMove:=True;
   Initboard.Red := 0;
   Initboard.Black := 0;
+  Initboard.Hash := 0;
 
   board:=Initboard;
+  board.Hash := CalculateHash(board);
   FirstIsRed:=True;
   NotinBack:=True;
   Redlist := TStringList.Create;
@@ -1073,6 +1087,7 @@ else begin
 end;
 
 mutiSideisRed := OneDepthSideisRed;
+board.Hash := CalculateHash(board); // Ensure hash is synchronized
 SetLength(FParallelTasks, 0);
 SetLength(mutiscores, templist.Count);
 SetLength(mutiresults, templist.Count);
@@ -1744,7 +1759,7 @@ begin
     exit;
   end;
 
-  h := CalculateHash(Aboard);
+  h := Aboard.Hash;
   oldAlpha := alpha;
   if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
   begin
@@ -2003,7 +2018,7 @@ begin
     exit;
   end;
 
-  h := CalculateHash(Aboard);
+  h := Aboard.Hash;
   oldAlpha := alpha;
   if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
   begin
@@ -2208,10 +2223,20 @@ end;
 
 procedure TForm1.RedBoardUpdate(var Aboard:Tboard;LastChess:Integer);
 var
-  moveBit: UInt64;
+  moveBit, flipped: UInt64;
+  i: Integer;
 begin
   moveBit := UInt64(1) shl (LastChess - 1);
-  ApplyBoardMove(Aboard.Red, Aboard.Black, moveBit);
+  ApplyBoardMove(Aboard.Red, Aboard.Black, moveBit, flipped);
+
+  UpdateHash(Aboard.Hash, LastChess - 1, 1);
+  while flipped <> 0 do
+  begin
+    i := BsfQWord(flipped);
+    UpdateHash(Aboard.Hash, i, -1);
+    UpdateHash(Aboard.Hash, i, 1);
+    flipped := flipped and not (UInt64(1) shl i);
+  end;
 end;
 
 procedure TForm1.RedChessClick(Sender: TObject);
@@ -2529,6 +2554,7 @@ begin
   SetBoardPiece(Initboard, 5, 5, -1);
 
   board:=Initboard;
+  board.Hash := CalculateHash(board);
   FirstIsRed:=True;
   NotinBack:=True;
   Redlist.Clear;
@@ -2573,6 +2599,7 @@ begin
   SetBoardPiece(Initboard, 5, 5, 1);  // Red
 
   board:=Initboard;
+  board.Hash := CalculateHash(board);
   FirstIsRed:=True;
   NotinBack:=True;
 
@@ -2605,6 +2632,7 @@ begin
   SetBoardPiece(Initboard, 5, 5, 1);
 
   board:=Initboard;
+  board.Hash := CalculateHash(board);
   FirstIsRed:=True;
   NotinBack:=True;
   Redlist.Clear;
@@ -2637,6 +2665,7 @@ begin
   SetBoardPiece(Initboard, 5, 5, -1); // Black
 
   board:=Initboard;
+  board.Hash := CalculateHash(board);
   FirstIsRed:=True;
   NotinBack:=True;
 
@@ -2669,6 +2698,7 @@ begin
   SetBoardPiece(Initboard, 5, 5, 1);
 
   board:=Initboard;
+  board.Hash := CalculateHash(board);
   FirstIsRed:=True;
   NotinBack:=True;
 
@@ -2701,6 +2731,7 @@ begin
   SetBoardPiece(Initboard, 5, 5, -1);
 
   board:=Initboard;
+  board.Hash := CalculateHash(board);
   FirstIsRed:=True;
   NotinBack:=True;
 
@@ -2725,10 +2756,20 @@ end;
 
 procedure TForm1.BlackBoardUpdate(var Aboard:Tboard;LastChess:Integer);
 var
-  moveBit: UInt64;
+  moveBit, flipped: UInt64;
+  i: Integer;
 begin
   moveBit := UInt64(1) shl (LastChess - 1);
-  ApplyBoardMove(Aboard.Black, Aboard.Red, moveBit);
+  ApplyBoardMove(Aboard.Black, Aboard.Red, moveBit, flipped);
+
+  UpdateHash(Aboard.Hash, LastChess - 1, -1);
+  while flipped <> 0 do
+  begin
+    i := BsfQWord(flipped);
+    UpdateHash(Aboard.Hash, i, 1);
+    UpdateHash(Aboard.Hash, i, -1);
+    flipped := flipped and not (UInt64(1) shl i);
+  end;
 end;
 
 
@@ -3395,6 +3436,7 @@ begin
     end;
   end;
   board:=Initboard;
+  board.Hash := CalculateHash(board);
   if MoveFirstRadioGroup.ItemIndex =0 then
   begin
     FirstIsRed:=True;
@@ -3810,7 +3852,7 @@ begin
     exit;
   end;
 
-  h := CalculateHash(Aboard);
+  h := Aboard.Hash;
   oldAlpha := alpha;
   if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
   begin
@@ -3952,7 +3994,7 @@ begin
     exit;
   end;
 
-  h := CalculateHash(Aboard);
+  h := Aboard.Hash;
   oldAlpha := alpha;
   if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
   begin
@@ -4154,6 +4196,7 @@ var a,b,c:integer; thinkstep: TMoveArray; t1: QWord; LMoveList: string;
 begin
   LMoveList := '';
   t1 := GetTickCount64;
+  board.Hash := CalculateHash(board); // Ensure hash is synchronized
   CallSyncUpdateAIUI('', '', '', True, False);
   thinkstep.Count := 0;
   Score(board,a,b);
@@ -4289,7 +4332,7 @@ begin
     exit;
   end;
 
-  h := CalculateHash(Aboard);
+  h := Aboard.Hash;
   oldAlpha := alpha;
   if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
   begin
