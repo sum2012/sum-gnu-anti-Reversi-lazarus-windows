@@ -591,7 +591,9 @@ begin
 end;
 
 var
+  GHasSSE41: Boolean = False;
   GHasSSE42: Boolean = False;
+  GHasPOPCNT: Boolean = False;
   GHasBMI2: Boolean = False;
 
 procedure DetectCPUFeatures;
@@ -602,33 +604,33 @@ begin
   vEBX := 0;
   {$ASMMODE ATT}
   asm
-    // Check SSE4.2 (and PopCnt)
+    // Check Features (EAX=1)
     movl $1, %eax
     cpuid
     movl %ecx, vECX
 
-    // Check BMI2 (EAX=7, ECX=0)
+    // Check Extended Features (EAX=7, ECX=0)
     movl $7, %eax
     xorl %ecx, %ecx
     cpuid
     movl %ebx, vEBX
   end ['EAX', 'EBX', 'ECX', 'EDX'];
+  GHasSSE41 := (vECX and (1 shl 19)) <> 0;
   GHasSSE42 := (vECX and (1 shl 20)) <> 0;
+  GHasPOPCNT := (vECX and (1 shl 23)) <> 0;
   GHasBMI2 := (vEBX and (1 shl 8)) <> 0;
 end;
 
 function PopCount(N: UInt64): Integer; inline;
 begin
-  if GHasSSE42 then
+  if GHasPOPCNT then
     Result := System.PopCnt(N)
   else
   begin
-    Result := 0;
-    while N <> 0 do
-    begin
-      N := N and (N - 1);
-      inc(Result);
-    end;
+    // SWAR (SIMD Within A Register) PopCount fallback
+    N := N - ((N shr 1) and $5555555555555555);
+    N := (N and $3333333333333333) + ((N shr 2) and $3333333333333333);
+    Result := (((N + (N shr 4)) and $0F0F0F0F0F0F0F0F) * $0101010101010101) shr 56;
   end;
 end;
 
@@ -1730,12 +1732,22 @@ begin
 end;
 
 procedure TForm1.AboutButtonClick(Sender: TObject);
+var
+  Features: string;
 begin
- ShowMessage('Copyright 2011,2012 by Wu Hon Sum'+#13+
-'This program is free software: you can redistribute it and/or modify'+#13+
-'it under the terms of the GNU General Public License as published by'+#13+
-'the Free Software Foundation, either version 3 of the License, or'+#13+
-'any later version.');
+  Features := '';
+  if GHasSSE41 then Features := Features + 'SSE4.1 ';
+  if GHasSSE42 then Features := Features + 'SSE4.2 ';
+  if GHasPOPCNT then Features := Features + 'POPCNT ';
+  if GHasBMI2 then Features := Features + 'BMI2 ';
+  if Features = '' then Features := 'None';
+
+  ShowMessage('Copyright 2011-2026 by Wu Hon Sum' + #13 +
+    'This program is free software: you can redistribute it and/or modify' + #13 +
+    'it under the terms of the GNU General Public License as published by' + #13 +
+    'the Free Software Foundation, either version 3 of the License, or' + #13 +
+    'any later version.' + #13#13 +
+    'Detected CPU Features: ' + Features);
 end;
 
 procedure TForm1.NornalDepthChange(Sender: TObject);
