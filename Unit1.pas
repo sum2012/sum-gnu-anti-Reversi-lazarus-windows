@@ -592,19 +592,29 @@ end;
 
 var
   GHasSSE42: Boolean = False;
+  GHasBMI2: Boolean = False;
 
-function IsSSE42Supported: Boolean;
+procedure DetectCPUFeatures;
 var
-  vECX: Cardinal;
+  vECX, vEBX: Cardinal;
 begin
   vECX := 0;
+  vEBX := 0;
   {$ASMMODE ATT}
   asm
+    // Check SSE4.2 (and PopCnt)
     movl $1, %eax
     cpuid
     movl %ecx, vECX
+
+    // Check BMI2 (EAX=7, ECX=0)
+    movl $7, %eax
+    xorl %ecx, %ecx
+    cpuid
+    movl %ebx, vEBX
   end ['EAX', 'EBX', 'ECX', 'EDX'];
-  Result := (vECX and (1 shl 20)) <> 0;
+  GHasSSE42 := (vECX and (1 shl 20)) <> 0;
+  GHasBMI2 := (vEBX and (1 shl 8)) <> 0;
 end;
 
 function PopCount(N: UInt64): Integer; inline;
@@ -646,161 +656,177 @@ end;
 
 function GetBoardMoves(Own, Opp: UInt64): UInt64;
 var
-  empty, t: UInt64;
+  empty, t, m: UInt64;
 begin
   empty := not (Own or Opp);
   Result := 0;
 
   // Right
-  t := (Own shl 1) and Opp and $FEFEFEFEFEFEFEFE;
-  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
+  m := Opp and $FEFEFEFEFEFEFEFE;
+  t := (Own shl 1) and m;
+  t := t or ((t shl 1) and m);
+  m := m and (m shl 1);
+  t := t or ((t shl 2) and m);
+  m := m and (m shl 2);
+  t := t or ((t shl 4) and m);
   Result := Result or ((t shl 1) and empty and $FEFEFEFEFEFEFEFE);
 
   // Left
-  t := (Own shr 1) and Opp and $7F7F7F7F7F7F7F7F;
-  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
+  m := Opp and $7F7F7F7F7F7F7F7F;
+  t := (Own shr 1) and m;
+  t := t or ((t shr 1) and m);
+  m := m and (m shr 1);
+  t := t or ((t shr 2) and m);
+  m := m and (m shr 2);
+  t := t or ((t shr 4) and m);
   Result := Result or ((t shr 1) and empty and $7F7F7F7F7F7F7F7F);
 
   // Down
-  t := (Own shl 8) and Opp;
-  t := t or ((t shl 8) and Opp);
-  t := t or ((t shl 8) and Opp);
-  t := t or ((t shl 8) and Opp);
-  t := t or ((t shl 8) and Opp);
-  t := t or ((t shl 8) and Opp);
+  m := Opp;
+  t := (Own shl 8) and m;
+  t := t or ((t shl 8) and m);
+  m := m and (m shl 8);
+  t := t or ((t shl 16) and m);
+  m := m and (m shl 16);
+  t := t or ((t shl 32) and m);
   Result := Result or ((t shl 8) and empty);
 
   // Up
-  t := (Own shr 8) and Opp;
-  t := t or ((t shr 8) and Opp);
-  t := t or ((t shr 8) and Opp);
-  t := t or ((t shr 8) and Opp);
-  t := t or ((t shr 8) and Opp);
-  t := t or ((t shr 8) and Opp);
+  m := Opp;
+  t := (Own shr 8) and m;
+  t := t or ((t shr 8) and m);
+  m := m and (m shr 8);
+  t := t or ((t shr 16) and m);
+  m := m and (m shr 16);
+  t := t or ((t shr 32) and m);
   Result := Result or ((t shr 8) and empty);
 
   // Down-Right
-  t := (Own shl 9) and Opp and $FEFEFEFEFEFEFEFE;
-  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
+  m := Opp and $FEFEFEFEFEFEFEFE;
+  t := (Own shl 9) and m;
+  t := t or ((t shl 9) and m);
+  m := m and (m shl 9);
+  t := t or ((t shl 18) and m);
+  m := m and (m shl 18);
+  t := t or ((t shl 36) and m);
   Result := Result or ((t shl 9) and empty and $FEFEFEFEFEFEFEFE);
 
   // Down-Left
-  t := (Own shl 7) and Opp and $7F7F7F7F7F7F7F7F;
-  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
+  m := Opp and $7F7F7F7F7F7F7F7F;
+  t := (Own shl 7) and m;
+  t := t or ((t shl 7) and m);
+  m := m and (m shl 7);
+  t := t or ((t shl 14) and m);
+  m := m and (m shl 14);
+  t := t or ((t shl 28) and m);
   Result := Result or ((t shl 7) and empty and $7F7F7F7F7F7F7F7F);
 
   // Up-Right
-  t := (Own shr 7) and Opp and $FEFEFEFEFEFEFEFE;
-  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
+  m := Opp and $FEFEFEFEFEFEFEFE;
+  t := (Own shr 7) and m;
+  t := t or ((t shr 7) and m);
+  m := m and (m shr 7);
+  t := t or ((t shr 14) and m);
+  m := m and (m shr 14);
+  t := t or ((t shr 28) and m);
   Result := Result or ((t shr 7) and empty and $FEFEFEFEFEFEFEFE);
 
   // Up-Left
-  t := (Own shr 9) and Opp and $7F7F7F7F7F7F7F7F;
-  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
+  m := Opp and $7F7F7F7F7F7F7F7F;
+  t := (Own shr 9) and m;
+  t := t or ((t shr 9) and m);
+  m := m and (m shr 9);
+  t := t or ((t shr 18) and m);
+  m := m and (m shr 18);
+  t := t or ((t shr 36) and m);
   Result := Result or ((t shr 9) and empty and $7F7F7F7F7F7F7F7F);
 end;
 
 procedure ApplyBoardMove(var Own, Opp: UInt64; Move: UInt64; out Flipped: UInt64);
 var
-  t: UInt64;
+  t, m: UInt64;
 begin
   Flipped := 0;
   Own := Own or Move;
 
   // Right
-  t := (Move shl 1) and Opp and $FEFEFEFEFEFEFEFE;
-  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shl 1) and Opp and $FEFEFEFEFEFEFEFE);
+  m := Opp and $FEFEFEFEFEFEFEFE;
+  t := (Move shl 1) and m;
+  t := t or ((t shl 1) and m);
+  m := m and (m shl 1);
+  t := t or ((t shl 2) and m);
+  m := m and (m shl 2);
+  t := t or ((t shl 4) and m);
   if ((t shl 1) and Own and $FEFEFEFEFEFEFEFE) <> 0 then Flipped := Flipped or t;
 
   // Left
-  t := (Move shr 1) and Opp and $7F7F7F7F7F7F7F7F;
-  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shr 1) and Opp and $7F7F7F7F7F7F7F7F);
+  m := Opp and $7F7F7F7F7F7F7F7F;
+  t := (Move shr 1) and m;
+  t := t or ((t shr 1) and m);
+  m := m and (m shr 1);
+  t := t or ((t shr 2) and m);
+  m := m and (m shr 2);
+  t := t or ((t shr 4) and m);
   if ((t shr 1) and Own and $7F7F7F7F7F7F7F7F) <> 0 then Flipped := Flipped or t;
 
   // Down
-  t := (Move shl 8) and Opp;
-  t := t or ((t shl 8) and Opp);
-  t := t or ((t shl 8) and Opp);
-  t := t or ((t shl 8) and Opp);
-  t := t or ((t shl 8) and Opp);
-  t := t or ((t shl 8) and Opp);
+  m := Opp;
+  t := (Move shl 8) and m;
+  t := t or ((t shl 8) and m);
+  m := m and (m shl 8);
+  t := t or ((t shl 16) and m);
+  m := m and (m shl 16);
+  t := t or ((t shl 32) and m);
   if ((t shl 8) and Own) <> 0 then Flipped := Flipped or t;
 
   // Up
-  t := (Move shr 8) and Opp;
-  t := t or ((t shr 8) and Opp);
-  t := t or ((t shr 8) and Opp);
-  t := t or ((t shr 8) and Opp);
-  t := t or ((t shr 8) and Opp);
-  t := t or ((t shr 8) and Opp);
+  m := Opp;
+  t := (Move shr 8) and m;
+  t := t or ((t shr 8) and m);
+  m := m and (m shr 8);
+  t := t or ((t shr 16) and m);
+  m := m and (m shr 16);
+  t := t or ((t shr 32) and m);
   if ((t shr 8) and Own) <> 0 then Flipped := Flipped or t;
 
   // Down-Right
-  t := (Move shl 9) and Opp and $FEFEFEFEFEFEFEFE;
-  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shl 9) and Opp and $FEFEFEFEFEFEFEFE);
+  m := Opp and $FEFEFEFEFEFEFEFE;
+  t := (Move shl 9) and m;
+  t := t or ((t shl 9) and m);
+  m := m and (m shl 9);
+  t := t or ((t shl 18) and m);
+  m := m and (m shl 18);
+  t := t or ((t shl 36) and m);
   if ((t shl 9) and Own and $FEFEFEFEFEFEFEFE) <> 0 then Flipped := Flipped or t;
 
   // Down-Left
-  t := (Move shl 7) and Opp and $7F7F7F7F7F7F7F7F;
-  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shl 7) and Opp and $7F7F7F7F7F7F7F7F);
+  m := Opp and $7F7F7F7F7F7F7F7F;
+  t := (Move shl 7) and m;
+  t := t or ((t shl 7) and m);
+  m := m and (m shl 7);
+  t := t or ((t shl 14) and m);
+  m := m and (m shl 14);
+  t := t or ((t shl 28) and m);
   if ((t shl 7) and Own and $7F7F7F7F7F7F7F7F) <> 0 then Flipped := Flipped or t;
 
   // Up-Right
-  t := (Move shr 7) and Opp and $FEFEFEFEFEFEFEFE;
-  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
-  t := t or ((t shr 7) and Opp and $FEFEFEFEFEFEFEFE);
+  m := Opp and $FEFEFEFEFEFEFEFE;
+  t := (Move shr 7) and m;
+  t := t or ((t shr 7) and m);
+  m := m and (m shr 7);
+  t := t or ((t shr 14) and m);
+  m := m and (m shr 14);
+  t := t or ((t shr 28) and m);
   if ((t shr 7) and Own and $FEFEFEFEFEFEFEFE) <> 0 then Flipped := Flipped or t;
 
   // Up-Left
-  t := (Move shr 9) and Opp and $7F7F7F7F7F7F7F7F;
-  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
-  t := t or ((t shr 9) and Opp and $7F7F7F7F7F7F7F7F);
+  m := Opp and $7F7F7F7F7F7F7F7F;
+  t := (Move shr 9) and m;
+  t := t or ((t shr 9) and m);
+  m := m and (m shr 9);
+  t := t or ((t shr 18) and m);
+  m := m and (m shr 18);
+  t := t or ((t shr 36) and m);
   if ((t shr 9) and Own and $7F7F7F7F7F7F7F7F) <> 0 then Flipped := Flipped or t;
 
   Own := Own or Flipped;
@@ -1042,7 +1068,7 @@ end;
 procedure TForm1.FormCreate(Sender: TObject);
 var a,b,CudaVersion:integer;
 begin
-  GHasSSE42 := IsSSE42Supported;
+  DetectCPUFeatures;
   FCudaEnabled := False;
   FCudaEnabled := False;
   FCudaContext := nil;
@@ -2191,7 +2217,7 @@ begin
     bit := BsfQWord(moves);
     temp.Moves[temp.Count] := bit + 1;
     inc(temp.Count);
-    moves := moves and not (UInt64(1) shl bit);
+    moves := moves and (moves - 1);
   end;
 end;
 
@@ -2207,7 +2233,7 @@ begin
     bit := BsfQWord(moves);
     temp.Moves[temp.Count] := bit + 1;
     inc(temp.Count);
-    moves := moves and not (UInt64(1) shl bit);
+    moves := moves and (moves - 1);
   end;
 end;
 
