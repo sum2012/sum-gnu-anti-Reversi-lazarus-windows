@@ -590,13 +590,35 @@ begin
   end;
 end;
 
-function PopCount(N: UInt64): Integer;
+var
+  GHasSSE42: Boolean = False;
+
+function IsSSE42Supported: Boolean;
+var
+  vECX: Cardinal;
 begin
-  Result := 0;
-  while N <> 0 do
+  vECX := 0;
+  {$ASMMODE ATT}
+  asm
+    movl $1, %eax
+    cpuid
+    movl %ecx, vECX
+  end ['EAX', 'EBX', 'ECX', 'EDX'];
+  Result := (vECX and (1 shl 20)) <> 0;
+end;
+
+function PopCount(N: UInt64): Integer; inline;
+begin
+  if GHasSSE42 then
+    Result := System.PopCnt(N)
+  else
   begin
-    N := N and (N - 1);
-    inc(Result);
+    Result := 0;
+    while N <> 0 do
+    begin
+      N := N and (N - 1);
+      inc(Result);
+    end;
   end;
 end;
 
@@ -1020,6 +1042,7 @@ end;
 procedure TForm1.FormCreate(Sender: TObject);
 var a,b,CudaVersion:integer;
 begin
+  GHasSSE42 := IsSSE42Supported;
   FCudaEnabled := False;
   FCudaEnabled := False;
   FCudaContext := nil;
