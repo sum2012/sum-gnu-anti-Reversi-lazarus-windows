@@ -39,7 +39,7 @@
 
 	cvt.s64.s32 	%rd1, %r1;
 	cvta.to.global.u64 	%rd7, %rd5;
-	mul.wide.s32 	%rd8, %r1, 16;
+	mul.wide.s32 	%rd8, %r1, 24;
 	add.s64 	%rd9, %rd7, %rd8;
 	ld.global.nc.u64 	%rd2, [%rd9];
 	popc.b64 	%r2, %rd2;
