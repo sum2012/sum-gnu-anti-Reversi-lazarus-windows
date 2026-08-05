@@ -285,7 +285,9 @@ type
       function AI(Aboard:Tboard;ComputerIsRed:Boolean):string;
       function MinMax(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
       function MinMaxRandom(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
-      function EvaluateScore(const Aboard:Tboard;const SideIsRed:Boolean):Integer;
+      procedure BatchEvaluateOnAVX512(const Boards: array of Tboard; const SideIsRed: Boolean; var Scores: array of Integer);
+    function InternalEvaluate(const Aboard:Tboard;const SideIsRed:Boolean; a, b: Integer):Integer; inline;
+    function EvaluateScore(const Aboard:Tboard;const SideIsRed:Boolean):Integer;
       function MinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
       function MutiMinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
       Procedure Scoresort(var scorelist:Tstringlist;var stepno:Tstringlist);
@@ -593,32 +595,83 @@ end;
 var
   GHasSSE41: Boolean = False;
   GHasSSE42: Boolean = False;
+  GHasAVX512F: Boolean = False;
+  GHasAVX512VPOPCNTDQ: Boolean = False;
   GHasPOPCNT: Boolean = False;
   GHasBMI2: Boolean = False;
 
 procedure DetectCPUFeatures;
 var
-  vECX, vEBX: Cardinal;
+  vEAX, vEBX, vECX, vEDX: Cardinal;
 begin
+  // Check Features (EAX=1)
   vECX := 0;
-  vEBX := 0;
   {$ASMMODE ATT}
   asm
-    // Check Features (EAX=1)
     movl $1, %eax
     cpuid
     movl %ecx, vECX
-
-    // Check Extended Features (EAX=7, ECX=0)
-    movl $7, %eax
-    xorl %ecx, %ecx
-    cpuid
-    movl %ebx, vEBX
   end ['EAX', 'EBX', 'ECX', 'EDX'];
   GHasSSE41 := (vECX and (1 shl 19)) <> 0;
   GHasSSE42 := (vECX and (1 shl 20)) <> 0;
   GHasPOPCNT := (vECX and (1 shl 23)) <> 0;
+
+  // Check Extended Features (EAX=7, ECX=0)
+  vEBX := 0;
+  vECX := 0;
+  asm
+    movl $7, %eax
+    xorl %ecx, %ecx
+    cpuid
+    movl %ebx, vEBX
+    movl %ecx, vECX
+  end ['EAX', 'EBX', 'ECX', 'EDX'];
+  GHasAVX512F := (vEBX and (1 shl 16)) <> 0;
   GHasBMI2 := (vEBX and (1 shl 8)) <> 0;
+  GHasAVX512VPOPCNTDQ := (vECX and (1 shl 14)) <> 0;
+end;
+
+procedure BatchPopCount(Inputs: Pointer; Outputs: PInteger; Count: Integer);
+var
+  temp: array[0..7] of UInt64;
+  i: Integer;
+  pIn: PQWord;
+  pOut: PInteger;
+begin
+  pIn := PQWord(Inputs);
+  pOut := Outputs;
+  if GHasAVX512VPOPCNTDQ and (Count >= 8) then
+  begin
+    while Count >= 8 do
+    begin
+      {$ASMMODE ATT}
+      asm
+        movq pIn, %rax
+        // vmovdqu64 (%rax), %zmm0
+        .byte 0x62, 0xF1, 0xFD, 0x48, 0x6F, 0x00
+        // vpopcntdq %zmm0, %zmm0
+        .byte 0x62, 0xF2, 0xFD, 0x48, 0x55, 0xC0
+        leaq temp, %rdx
+        // vmovdqu64 %zmm0, (%rdx)
+        .byte 0x62, 0xF1, 0xFD, 0x48, 0x7F, 0x02
+      end ['rax', 'rdx', 'xmm0'];
+      for i := 0 to 7 do
+      begin
+        pOut^ := Integer(temp[i]);
+        Inc(pOut);
+      end;
+      Inc(pIn, 8);
+      Dec(Count, 8);
+    end;
+  end;
+
+  while Count > 0 do
+  begin
+    pOut^ := Integer(System.PopCnt(pIn^));
+    Inc(pIn);
+    Inc(pOut);
+    Dec(Count);
+  end;
 end;
 
 function PopCount(N: UInt64): Integer; inline;
@@ -634,7 +687,7 @@ begin
   end;
 end;
 
-function GetBoardPiece(const AB: Tboard; Row, Col: Integer): Integer;
+function GetBoardPiece(const AB: Tboard; Row, Col: Integer): Integer; inline;
 var bit: Integer;
 begin
   if (Row < 1) or (Row > 8) or (Col < 1) or (Col > 8) then exit(0);
@@ -1395,8 +1448,13 @@ begin
     system.EnterCriticalSection(MyCriticalSection);
     FGpuEvalCount := -1000000;
     system.LeaveCriticalSection(MyCriticalSection);
-    for i := 0 to num_boards - 1 do
-      Scores[i] := EvaluateScore(Boards[i], SideIsRed);
+    if GHasAVX512VPOPCNTDQ then
+      BatchEvaluateOnAVX512(Boards, SideIsRed, Scores)
+    else
+    begin
+      for i := 0 to num_boards - 1 do
+        Scores[i] := EvaluateScore(Boards[i], SideIsRed);
+    end;
   end
   else
   begin
@@ -1469,8 +1527,13 @@ begin
     system.EnterCriticalSection(MyCriticalSection);
     FGpuEvalCount := -1000000;
     system.LeaveCriticalSection(MyCriticalSection);
-    for i := 0 to num_boards - 1 do
-      Scores[i] := EvaluateScore(Boards[i], SideIsRed);
+    if GHasAVX512VPOPCNTDQ then
+      BatchEvaluateOnAVX512(Boards, SideIsRed, Scores)
+    else
+    begin
+      for i := 0 to num_boards - 1 do
+        Scores[i] := EvaluateScore(Boards[i], SideIsRed);
+    end;
   end
   else
   begin
@@ -1738,6 +1801,8 @@ begin
   Features := '';
   if GHasSSE41 then Features := Features + 'SSE4.1 ';
   if GHasSSE42 then Features := Features + 'SSE4.2 ';
+  if GHasAVX512F then Features := Features + 'AVX512F ';
+  if GHasAVX512VPOPCNTDQ then Features := Features + 'AVX512VPOPCNTDQ ';
   if GHasPOPCNT then Features := Features + 'POPCNT ';
   if GHasBMI2 then Features := Features + 'BMI2 ';
   if Features = '' then Features := 'None';
@@ -2496,7 +2561,7 @@ begin
   templist.Free;
 end;
 
-procedure TForm1.Score(const Aboard:Tboard;var RedScore,BlackScore:integer);
+procedure TForm1.Score(const Aboard:Tboard;var RedScore,BlackScore:integer); inline;
 begin
   RedScore := PopCount(Aboard.Red);
   BlackScore := PopCount(Aboard.Black);
@@ -4627,12 +4692,8 @@ begin
 
 end;
 
-function Tform1.EvaluateScore(const Aboard:Tboard;const SideIsRed:Boolean):Integer;
-var a,b:integer;
+function Tform1.InternalEvaluate(const Aboard:Tboard;const SideIsRed:Boolean; a, b: Integer):Integer; inline;
 begin
-  a:=0;
-  b:=0;
-  Score(Aboard,a,b);
   if a+b <= 59 then begin
     if GetBoardPiece(Aboard, 1, 1) = 0 then
       Result:= b-a+GetBoardPiece(Aboard, 2, 1)*posmark[2][1]+GetBoardPiece(Aboard, 1, 2)*posmark[1][2]
@@ -4663,6 +4724,39 @@ begin
   else
     Result := a-b;
  end;
+end;
+
+function Tform1.EvaluateScore(const Aboard:Tboard;const SideIsRed:Boolean):Integer;
+begin
+  Result := InternalEvaluate(Aboard, SideIsRed, PopCount(Aboard.Red), PopCount(Aboard.Black));
+end;
+
+procedure TForm1.BatchEvaluateOnAVX512(const Boards: array of Tboard; const SideIsRed: Boolean; var Scores: array of Integer);
+var
+  num_boards, i, j: Integer;
+  reds, blacks: array[0..7] of UInt64;
+  red_scores, black_scores: array[0..7] of Integer;
+begin
+  num_boards := Length(Boards);
+  i := 0;
+  while i <= num_boards - 8 do
+  begin
+    for j := 0 to 7 do
+    begin
+      reds[j] := Boards[i + j].Red;
+      blacks[j] := Boards[i + j].Black;
+    end;
+    BatchPopCount(@reds[0], @red_scores[0], 8);
+    BatchPopCount(@blacks[0], @black_scores[0], 8);
+    for j := 0 to 7 do
+      Scores[i + j] := InternalEvaluate(Boards[i + j], SideIsRed, red_scores[j], black_scores[j]);
+    Inc(i, 8);
+  end;
+  while i < num_boards do
+  begin
+    Scores[i] := EvaluateScore(Boards[i], SideIsRed);
+    Inc(i);
+  end;
 end;
 
 
