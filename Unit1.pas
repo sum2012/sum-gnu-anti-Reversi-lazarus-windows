@@ -265,7 +265,7 @@ type
       FZobristSide: UInt64;
       FTranspositionTable: array of TTranspositionEntry;
       procedure InitializeZobrist;
-      function CalculateHash(const ABoard: Tboard): UInt64;
+      function CalculateHash(const ABoard: Tboard; SideIsRed: Boolean): UInt64;
       procedure UpdateHash(var AHash: UInt64; PieceIdx: Integer; PieceType: Integer); // PieceType: 1=Red, -1=Black, 0=Remove/Toggle
       procedure StoreTT(Hash: UInt64; Depth, Value, Flag, BestMove: Integer);
       function LookupTT(Hash: UInt64; Depth, Alpha, Beta: Integer; var Value, BestMove: Integer): Boolean;
@@ -411,8 +411,8 @@ var
   i: Integer;
   function Random64: UInt64;
   begin
-    Result := (UInt64(Random($FFFF)) shl 48) or (UInt64(Random($FFFF)) shl 32) or
-              (UInt64(Random($FFFF)) shl 16) or UInt64(Random($FFFF));
+    Result := (UInt64(Random($10000)) shl 48) or (UInt64(Random($10000)) shl 32) or
+              (UInt64(Random($10000)) shl 16) or UInt64(Random($10000));
   end;
 begin
   for i := 0 to 63 do
@@ -437,12 +437,13 @@ begin
     AHash := AHash xor FZobristBlack[PieceIdx];
 end;
 
-function TForm1.CalculateHash(const ABoard: Tboard): UInt64;
+function TForm1.CalculateHash(const ABoard: Tboard; SideIsRed: Boolean): UInt64;
 var
   i: Integer;
   Red, Black: UInt64;
 begin
   Result := 0;
+  if SideIsRed then Result := Result xor FZobristSide;
   Red := ABoard.Red;
   Black := ABoard.Black;
   while Red <> 0 do
@@ -1154,7 +1155,7 @@ begin
   Initboard.Hash := 0;
 
   board:=Initboard;
-  board.Hash := CalculateHash(board);
+  board.Hash := CalculateHash(board, True);
   FirstIsRed:=True;
   NotinBack:=True;
   Redlist := TStringList.Create;
@@ -1210,7 +1211,7 @@ else begin
 end;
 
 mutiSideisRed := OneDepthSideisRed;
-board.Hash := CalculateHash(board); // Ensure hash is synchronized
+board.Hash := CalculateHash(board, OneDepthSideisRed); // Ensure hash is synchronized
 SetLength(FParallelTasks, 0);
 SetLength(mutiscores, templist.Count);
 SetLength(mutiresults, templist.Count);
@@ -1367,7 +1368,7 @@ begin
      FGpuEvalCount := 0;
      tempdepth:= strToint(Endgamedepth.text);
      score(board,a,b);
-     if a+b + tempdepth > 64 then
+     if a+b + tempdepth >= 64 then
        tempdepth:= 64-a-b
      else
        tempdepth:= strToint(Nornaldepth.Text);
@@ -1386,7 +1387,7 @@ begin
 
   score(board,a,b);
   tempdepth:= strToint(Endgamedepth.text);
-  if a+b + tempdepth > 64 then
+  if a+b + tempdepth >= 64 then
     tempdepth:= 64-a-b
   else
     tempdepth:= strToint(Nornaldepth.Text);
@@ -1908,7 +1909,7 @@ begin
   oldAlpha := alpha;
   if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
   begin
-    if (tt_best_move <> -2) and (tt_best_move <> -1) then
+    if (tt_best_move <> -2) then
     begin
        aithinkstep.Moves[aithinkstep.Count] := tt_best_move;
        inc(aithinkstep.Count);
@@ -1936,6 +1937,9 @@ begin
       Result := EvaluateScore(Aboard, SideIsRed);
       exit;
     end;
+    aithinkstep.Moves[aithinkstep.Count] := -1; // PASS
+    inc(aithinkstep.Count);
+    Aboard.Hash := Aboard.Hash xor FZobristSide;
     Result := -MutiMinMaxStart(Aboard, Not SideIsRed, depth, -beta, -alpha, aithinkstep);
     exit;
   end;
@@ -2167,7 +2171,7 @@ begin
   oldAlpha := alpha;
   if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
   begin
-    if (tt_best_move <> -2) and (tt_best_move <> -1) then
+    if (tt_best_move <> -2) then
     begin
        aithinkstep.Moves[aithinkstep.Count] := tt_best_move;
        inc(aithinkstep.Count);
@@ -2207,6 +2211,7 @@ begin
     l_oldaithinkstep := aithinkstep;
     aithinkstep.Moves[aithinkstep.Count] := -1; // PASS
     inc(aithinkstep.Count);
+    Aboard.Hash := Aboard.Hash xor FZobristSide;
     l_value := -MutiMinMax(Aboard, Not SideIsRed, depth, -beta, -alpha, aithinkstep);
     StoreTT(h, depth, l_value, TT_EXACT, -1);
     Result := l_value;
@@ -2382,6 +2387,7 @@ begin
     UpdateHash(Aboard.Hash, i, 1);
     flipped := flipped and not (UInt64(1) shl i);
   end;
+  Aboard.Hash := Aboard.Hash xor FZobristSide;
 end;
 
 procedure TForm1.RedChessClick(Sender: TObject);
@@ -2699,7 +2705,7 @@ begin
   SetBoardPiece(Initboard, 5, 5, -1);
 
   board:=Initboard;
-  board.Hash := CalculateHash(board);
+  board.Hash := CalculateHash(board, True);
   FirstIsRed:=True;
   NotinBack:=True;
   Redlist.Clear;
@@ -2744,7 +2750,7 @@ begin
   SetBoardPiece(Initboard, 5, 5, 1);  // Red
 
   board:=Initboard;
-  board.Hash := CalculateHash(board);
+  board.Hash := CalculateHash(board, True);
   FirstIsRed:=True;
   NotinBack:=True;
 
@@ -2777,7 +2783,7 @@ begin
   SetBoardPiece(Initboard, 5, 5, 1);
 
   board:=Initboard;
-  board.Hash := CalculateHash(board);
+  board.Hash := CalculateHash(board, True);
   FirstIsRed:=True;
   NotinBack:=True;
   Redlist.Clear;
@@ -2810,7 +2816,7 @@ begin
   SetBoardPiece(Initboard, 5, 5, -1); // Black
 
   board:=Initboard;
-  board.Hash := CalculateHash(board);
+  board.Hash := CalculateHash(board, True);
   FirstIsRed:=True;
   NotinBack:=True;
 
@@ -2843,7 +2849,7 @@ begin
   SetBoardPiece(Initboard, 5, 5, 1);
 
   board:=Initboard;
-  board.Hash := CalculateHash(board);
+  board.Hash := CalculateHash(board, True);
   FirstIsRed:=True;
   NotinBack:=True;
 
@@ -2876,7 +2882,7 @@ begin
   SetBoardPiece(Initboard, 5, 5, -1);
 
   board:=Initboard;
-  board.Hash := CalculateHash(board);
+  board.Hash := CalculateHash(board, True);
   FirstIsRed:=True;
   NotinBack:=True;
 
@@ -2915,6 +2921,7 @@ begin
     UpdateHash(Aboard.Hash, i, -1);
     flipped := flipped and not (UInt64(1) shl i);
   end;
+  Aboard.Hash := Aboard.Hash xor FZobristSide;
 end;
 
 
@@ -3581,7 +3588,7 @@ begin
     end;
   end;
   board:=Initboard;
-  board.Hash := CalculateHash(board);
+  board.Hash := CalculateHash(board, MoveFirstRadioGroup.ItemIndex = 0);
   if MoveFirstRadioGroup.ItemIndex =0 then
   begin
     FirstIsRed:=True;
@@ -4001,7 +4008,7 @@ begin
   oldAlpha := alpha;
   if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
   begin
-    if (tt_best_move <> -2) and (tt_best_move <> -1) then
+    if (tt_best_move <> -2) then
     begin
        aithinkstep.Moves[aithinkstep.Count] := tt_best_move;
        inc(aithinkstep.Count);
@@ -4055,11 +4062,9 @@ begin
     if SideIsRed then FastMakeBlackMove(Aboard, moves)
     else FastMakeRedMove(Aboard, moves);
 
-    if moves.Count = 0 then
-    begin
-      Result := EvaluateScore(Aboard, SideIsRed);
-      exit;
-    end;
+    aithinkstep.Moves[aithinkstep.Count] := -1; // PASS
+    inc(aithinkstep.Count);
+    Aboard.Hash := Aboard.Hash xor FZobristSide;
     value := -MinMax(Aboard, Not SideIsRed, depth, -beta, -alpha, aithinkstep);
     StoreTT(h, depth, value, TT_EXACT, -1);
     Result := value;
@@ -4143,7 +4148,7 @@ begin
   oldAlpha := alpha;
   if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
   begin
-    if (tt_best_move <> -2) and (tt_best_move <> -1) then
+    if (tt_best_move <> -2) then
     begin
        aithinkstep.Moves[aithinkstep.Count] := tt_best_move;
        inc(aithinkstep.Count);
@@ -4294,6 +4299,7 @@ begin
     oldaithinkstep := aithinkstep;
     aithinkstep.Moves[aithinkstep.Count] := -1; // PASS
     inc(aithinkstep.Count);
+    Aboard.Hash := Aboard.Hash xor FZobristSide;
     value := -MinMax(Aboard, Not SideIsRed, depth, -beta, -alpha, aithinkstep);
     StoreTT(h, depth, value, TT_EXACT, -1);
     Result := value;
@@ -4341,7 +4347,7 @@ var a,b,c:integer; thinkstep: TMoveArray; t1: QWord; LMoveList: string;
 begin
   LMoveList := '';
   t1 := GetTickCount64;
-  board.Hash := CalculateHash(board); // Ensure hash is synchronized
+  board.Hash := CalculateHash(board, ComputerIsRed); // Ensure hash is synchronized
   CallSyncUpdateAIUI('', '', '', True, False);
   thinkstep.Count := 0;
   Score(board,a,b);
@@ -4363,7 +4369,7 @@ begin
   //aimovelist only output next move and score
   score(Aboard,a,b);
   Realdepth:= strToint(Endgamedepth.text);
-  if a+b + Realdepth > 64 then
+  if a+b + Realdepth >= 64 then
     Realdepth:= 64-a-b
   else
     Realdepth:= strToint(Nornaldepth.Text);
@@ -4481,7 +4487,7 @@ begin
   oldAlpha := alpha;
   if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
   begin
-    if (tt_best_move <> -2) and (tt_best_move <> -1) then
+    if (tt_best_move <> -2) then
     begin
        aithinkstep.Moves[aithinkstep.Count] := tt_best_move;
        inc(aithinkstep.Count);
@@ -4544,6 +4550,7 @@ begin
     current_path.Count := 0;
     current_path.Moves[0] := -1; // PASS
     current_path.Count := 1;
+    Aboard.Hash := Aboard.Hash xor FZobristSide;
     Result := -MinMaxStart(Aboard, Not SideIsRed, depth, -beta, -alpha, current_path);
     aithinkstep := current_path;
     exit;
