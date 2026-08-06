@@ -1368,7 +1368,7 @@ begin
      FGpuEvalCount := 0;
      tempdepth:= strToint(Endgamedepth.text);
      score(board,a,b);
-     if a+b + tempdepth > 64 then
+     if a+b + tempdepth >= 64 then
        tempdepth:= 64-a-b
      else
        tempdepth:= strToint(Nornaldepth.Text);
@@ -1387,7 +1387,7 @@ begin
 
   score(board,a,b);
   tempdepth:= strToint(Endgamedepth.text);
-  if a+b + tempdepth > 64 then
+  if a+b + tempdepth >= 64 then
     tempdepth:= 64-a-b
   else
     tempdepth:= strToint(Nornaldepth.Text);
@@ -4369,7 +4369,7 @@ begin
   //aimovelist only output next move and score
   score(Aboard,a,b);
   Realdepth:= strToint(Endgamedepth.text);
-  if a+b + Realdepth > 64 then
+  if a+b + Realdepth >= 64 then
     Realdepth:= 64-a-b
   else
     Realdepth:= strToint(Nornaldepth.Text);
