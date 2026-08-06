@@ -2514,7 +2514,7 @@ begin
       score(board,a,b);
       if a < b Then
         ShowMessage('Both no more move,finish game'+#13+'Red win')
-      else if a < b then
+      else if a > b then
         ShowMessage('Both no more move,finish game'+#13+'Black win')
       else if a = b then
         ShowMessage('Both no more move,finish game'+#13+'Draw');
