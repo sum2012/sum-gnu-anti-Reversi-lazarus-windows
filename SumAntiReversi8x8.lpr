@@ -22,12 +22,16 @@ program SumAntiReversi8x8;
 {$APPTYPE CONSOLE}
 
 uses
-  Forms, Interfaces, LCLIntf,
+  Windows, Forms, Interfaces, LCLIntf,
   Unit1 in 'Unit1.pas' {Form1};
 
 {$R *.res}
 
 begin
+  // Hide console if not in test mode
+  if (ParamCount = 0) or (ParamStr(1) <> '--test') then
+    FreeConsole;
+
   Application.Initialize;
   Application.CreateForm(TForm1, Form1);
   if (ParamCount > 0) and (ParamStr(1) = '--test') then
