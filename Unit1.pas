@@ -196,7 +196,7 @@ type
     procedure NornalDepthChange(Sender: TObject);
     procedure Timer1Timer(Sender: TObject);
     procedure ComputerFirstButtonClick(Sender: TObject);
-    procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
+    procedure FormClose(Sender: TObject; var {%H-}CloseAction: TCloseAction);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure HumanFirstButtonClick(Sender: TObject);
@@ -259,7 +259,7 @@ type
       FCudaFunc: CUfunction;
       FCudaSearchFunc: CUfunction;
       FGpuEvalCount: Int64;
-      FGpuBoardsBuf, FGpuResultsBuf, FGpuPosMarkBuf, FGpuTransposedBuf: CUdeviceptr;
+      FGpuBoardsBuf, FGpuResultsBuf, FGpuTransposedBuf: CUdeviceptr;
       FGpuBufSize: NativeUInt;
       FZobristRed: array[0..63] of UInt64;
       FZobristBlack: array[0..63] of UInt64;
@@ -293,7 +293,7 @@ type
       function MutiMinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
       Procedure Scoresort(var scorelist:Tstringlist;var stepno:Tstringlist);
       procedure FastScoresort(var moves: TMoveArray; var scores: array of Integer);
-      function GetMoveHeuristic(move: Integer; SideIsRed: Boolean): Integer;
+      function GetMoveHeuristic(move: Integer; {%H-}SideIsRed: Boolean): Integer;
       function ThinkNumber(Aboard:Tboard;SideIsRed:Boolean;depth:integer):integer;
       function BoardtoFen:String;
       function MutiMinMax(Aboard:Tboard;const SideIsRed:Boolean;const depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
@@ -555,7 +555,7 @@ begin
   end;
 end;
 
-function TForm1.GetMoveHeuristic(move: Integer; SideIsRed: Boolean): Integer;
+function TForm1.GetMoveHeuristic(move: Integer; {%H-}SideIsRed: Boolean): Integer;
 var
   r, c: Integer;
 begin
@@ -953,6 +953,7 @@ var
 begin
   if FMaxThreadCount = 0 then
   begin
+    SI.dwNumberOfProcessors := 0;
     GetSystemInfo(SI);
     FMaxThreadCount := SI.dwNumberOfProcessors;
   end;
@@ -1126,7 +1127,7 @@ begin
 end;
 
 procedure TForm1.FormCreate(Sender: TObject);
-var a,b,CudaVersion:integer;
+var CudaVersion:integer;
 begin
   DetectCPUFeatures;
   FCudaEnabled := False;
@@ -1140,6 +1141,7 @@ begin
   Timer1.Interval := 100; // Faster updates for decoupled UI
 
   // Auto-detect and enable CUDA 12.6 or above
+  CudaVersion := 0;
   if DetectCudaVersion(CudaVersion) then
   begin
     if CudaVersion >= 12060 then
@@ -1184,12 +1186,14 @@ begin
   Label4.Caption:='0';
 
 end;
-function TForm1.Muti(const ComputerisRed:Boolean):String;
+function TForm1.Muti(const ComputerisRed:Boolean):string;
+var a,b,c,tempdepth:integer; aibestmove, move: TMoveArray;
 function test(const depth:integer;const cuted:Boolean;const fullthink:boolean):string;
-var a,b,c,d,i,j,bestscore,cutnum, temp_idx, best_count:integer; templist, templist2: TMoveArray; OneDepthSideisRed:boolean; bestmove:string; move: TMoveArray;
+var a,b,i,j,bestscore, temp_idx, best_count:integer; templist, templist2: TMoveArray; OneDepthSideisRed:boolean; bestmove:string; move: TMoveArray;
     sort_indices: array of Integer;
 begin
   Result := '';
+  move.Count := 0;
   templist.Count := 0;
   templist2.Count := 0;
 if ComputerisRed = False then
@@ -1350,19 +1354,16 @@ else begin
     i := templist.Count div 2 + 1 // Match the "top half of ties" logic
   else
     i := templist.Count;
-
   for a := 0 to i - 1 do
   begin
     mutisteplist.Moves[mutisteplist.Count] := mutiresults[a].Moves[0];
     inc(mutisteplist.Count);
   end;
 end;
-mutitemplist.Count := 0;
-mutiscorelist.Count := 0;
 end;
-var a,b,c,tempdepth:integer; aibestmove, move: TMoveArray;
 begin
   Result := '';
+  move.Count := 0;
   if FCudaEnabled then
   begin
      aibestmove.Count := 0;
@@ -1370,6 +1371,7 @@ begin
      CallSyncUpdateAIUI('', '', '', False, False);
      FGpuEvalCount := 0;
      tempdepth:= strToint(Endgamedepth.text);
+     a := 0; b := 0;
      score(board,a,b);
      if a+b + tempdepth >= 64 then
        tempdepth:= 64-a-b
@@ -1388,6 +1390,7 @@ begin
   else FastMakeBlackMove(board, move);
   c := move.Count;
 
+  a := 0; b := 0;
   score(board,a,b);
   tempdepth:= strToint(Endgamedepth.text);
   if a+b + tempdepth >= 64 then
@@ -1407,6 +1410,8 @@ begin
     Result:=test(tempdepth,true,True);
   end;
   mutisteplist.Count := 0;
+  mutitemplist.Count := 0;
+  mutiscorelist.Count := 0;
 end;
 
 
@@ -1420,6 +1425,8 @@ var
   res: CUresult;
   boards_ptr, results_ptr: CUdeviceptr;
 begin
+  boards_ptr := 0;
+  results_ptr := 0;
   num_boards := Length(Boards);
   if (FCudaFunc = nil) or (num_boards = 0) then exit;
 
@@ -1493,6 +1500,8 @@ var
   res: CUresult;
   boards_ptr, results_ptr: CUdeviceptr;
 begin
+  boards_ptr := 0;
+  results_ptr := 0;
   num_boards := Length(Boards);
   if (FCudaSearchFunc = nil) or (num_boards = 0) then
   begin
@@ -1889,14 +1898,18 @@ begin
 end;
 
 function TForm1.MutiMinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
-var a,b,c,d,bestvalue, value, best_a_move, oldAlpha:integer; moves: TMoveArray; tempboard:Tboard;
+var a,b,bestvalue, value, best_a_move, oldAlpha:integer; moves: TMoveArray; tempboard:Tboard;
     scores: array[0..63] of Integer;
     best_paths: array of TMoveArray;
     current_path, oldaithinkstep: TMoveArray;
     h: UInt64;
     tt_value, tt_best_move: Integer;
 begin
+  best_paths := nil;
+  a := 0; b := 0;
   Score(Aboard,a,b);
+  scores[0] := 0;
+  FillChar(scores, SizeOf(scores), 0);
   if a = 0 then
   begin
     if SideIsRed then Result := 2000 else Result := -2000;
@@ -1910,6 +1923,8 @@ begin
 
   h := Aboard.Hash;
   oldAlpha := alpha;
+  tt_value := 0;
+  tt_best_move := -2;
   if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
   begin
     if (tt_best_move <> -2) then
@@ -1927,6 +1942,7 @@ begin
   end;
 
   bestvalue := -INF;
+  moves.Count := 0;
   if SideIsRed then FastMakeRedMove(Aboard, moves)
   else FastMakeBlackMove(Aboard, moves);
 
@@ -2058,6 +2074,8 @@ var
     g_oldaithinkstep: TMoveArray;
   begin
     Result := False;
+    child_moves.Count := 0;
+    grandchild_moves.Count := 0;
     if SideIsRed then FastMakeRedMove(Aboard, l_moves)
     else FastMakeBlackMove(Aboard, l_moves);
 
@@ -2159,6 +2177,7 @@ var
 begin
   rScore := 0; bScore := 0;
   Score(Aboard, rScore, bScore);
+  l_bestvalue := -INF;
   if rScore = 0 then
   begin
     if SideIsRed then Result := 2000 else Result := -2000;
@@ -2172,6 +2191,8 @@ begin
 
   h := Aboard.Hash;
   oldAlpha := alpha;
+  tt_value := 0;
+  tt_best_move := -2;
   if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
   begin
     if (tt_best_move <> -2) then
@@ -2198,6 +2219,7 @@ begin
   end;
 
   l_bestvalue := -INF;
+  l_moves.Count := 0;
   if SideIsRed then FastMakeRedMove(Aboard, l_moves)
   else FastMakeBlackMove(Aboard, l_moves);
 
@@ -2227,6 +2249,8 @@ begin
 
   if l_moves.Count > 1 then
   begin
+    l_scores[0] := 0;
+    FillChar(l_scores, SizeOf(l_scores), 0);
     if depth > 4 then
     begin
       for i := 0 to l_moves.Count - 1 do
@@ -2697,7 +2721,6 @@ begin
 end;
 
 procedure TForm1.Startposition1ButtonClick(Sender: TObject);
-var a,b:integer;
 begin
 //  RedMove:=True;
   Initboard.Red := 0;
@@ -2747,6 +2770,7 @@ var
   r, c: Integer;
   moveList: TMoveArray;
 begin
+  moveList.Count := 0;
   // Ensure CUDA is disabled for CPU-only test
   FCudaEnabled := False;
 
@@ -2826,11 +2850,7 @@ begin
 end;
 
 procedure TForm1.Startposition2ButtonClick(Sender: TObject);
-var a,b:integer;
 begin
- for a:= 1 to 8 do
-    begin
-    end;
   Initboard.Red := 0;
   Initboard.Black := 0;
   SetBoardPiece(Initboard, 4, 4, -1); // Black
@@ -2862,7 +2882,6 @@ begin
 end;
 
 procedure TForm1.Startposition3ButtonClick(Sender: TObject);
-var a,b:integer;
 begin
   Initboard.Red := 0;
   Initboard.Black := 0;
@@ -2895,7 +2914,6 @@ end;
 
 
 procedure TForm1.Startposition4ButtonClick(Sender: TObject);
-var a,b:integer;
 begin
   Initboard.Red := 0;
   Initboard.Black := 0;
@@ -2928,7 +2946,6 @@ begin
 end;
 
 procedure TForm1.Startposition6uttonClick(Sender: TObject);
-var a,b:integer;
 begin
   Initboard.Red := 0;
   Initboard.Black := 0;
@@ -2961,7 +2978,6 @@ begin
 end;
 
 procedure TForm1.StartpositionButtonClick(Sender: TObject);
-var a,b:integer;
 begin
   Initboard.Red := 0;
   Initboard.Black := 0;
@@ -3352,6 +3368,7 @@ begin
         StepListBox.Clear;
       RedNoMove:=False;
       BlackNoMove:=False;
+      b := 0; c := 0;
       Score(Board,b,c);
       if b+c > 3 then
       begin
@@ -3405,6 +3422,7 @@ begin
     begin
       RedNoMove:=False;
       BlackNoMove:=False;
+      b := 0; c := 0;
       Score(Board,b,c);
       if b+c > 4 then
       begin
@@ -3470,6 +3488,7 @@ begin
     begin
       RedNoMove:=False;
       BlackNoMove:=False;
+      b := 0; c := 0;
       Score(Board,b,c);
       if b+c > 4 then
       begin
@@ -3523,6 +3542,7 @@ begin
     begin
       RedNoMove:=False;
       BlackNoMove:=False;
+      b := 0; c := 0;
       Score(Board,b,c);
       if b+c > 4 then
       begin
@@ -3924,6 +3944,7 @@ begin
       MakeClick(templist,'player2');
     end;
   end;
+  b := 0; c := 0;
   score(board,b,c);
   label3.Caption:=intTostr(b);
   label4.caption:=intTostr(c);
@@ -4054,6 +4075,7 @@ begin
   movedlist.Delete(movedlist.Count-1);
   if StepListBox.items.Count < 2 then
     backbutton.Enabled:=False;
+  a := 0; b := 0;
   Score(board,a,b);
   Label3.Caption:= inttostr(a);
   Label4.Caption:= inttostr(b);
@@ -4064,9 +4086,8 @@ end;
 
 
 function TForm1.MinMaxRandom(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
-var a,b,c,d,bestvalue, value, best_a_move, oldAlpha:integer; moves: TMoveArray; tempboard:Tboard;
+var a,b,bestvalue, value, best_a_move, oldAlpha:integer; moves: TMoveArray; tempboard:Tboard;
     oldaithinkstep, bestaithinkstep: TMoveArray;
-    aithinksteplist: array of TMoveArray;
     scores: array[0..63] of Integer;
     h: UInt64;
     tt_value, tt_best_move: Integer;
@@ -4075,7 +4096,10 @@ begin
 //一旦棋局結束就不必繼續搜索了，直接返回極值。
 //但由於黑白棋不存在中途結束的情況，故省略。
 //  bestaithinkstep:=aithinkstep;
+  a := 0; b := 0;
   Score(Aboard,a,b);
+  scores[0] := 0;
+  FillChar(scores, SizeOf(scores), 0);
   if a = 0 then
   begin
     if SideIsRed then
@@ -4095,6 +4119,8 @@ begin
 
   h := Aboard.Hash;
   oldAlpha := alpha;
+  tt_value := 0;
+  tt_best_move := -2;
   if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
   begin
     if (tt_best_move <> -2) then
@@ -4112,6 +4138,7 @@ begin
   end;
 
   bestvalue := -INF;
+  moves.Count := 0;
   if SideIsRed then FastMakeRedMove(Aboard, moves)
   else FastMakeBlackMove(Aboard, moves);
 
@@ -4163,6 +4190,7 @@ begin
   tempboard := Aboard;
   oldaithinkstep := aithinkstep;
   bestaithinkstep := aithinkstep; // Initialize with current path
+  best_a_move := -2;
 
   for a := 0 to moves.Count - 1 do
   begin
@@ -4204,7 +4232,7 @@ begin
 end;
 
 function TForm1.MinMax(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
-var a,b,c,d,bestvalue, value, b_pos, c_pos, node_val, branch_best, best_a_move:integer;
+var a,b,c,bestvalue, value, node_val, branch_best, best_a_move:integer;
     moves, child_moves, grandchild_moves: TMoveArray;
     tempboard, tempboard2: Tboard;
     oldaithinkstep, bestaithinkstep: TMoveArray;
@@ -4215,7 +4243,13 @@ var a,b,c,d,bestvalue, value, b_pos, c_pos, node_val, branch_best, best_a_move:i
     oldAlpha, tt_value, tt_best_move: Integer;
 begin
   bestaithinkstep:=aithinkstep;
+  a := 0; b := 0;
   Score(Aboard,a,b);
+  moves.Count := 0;
+  child_moves.Count := 0;
+  grandchild_moves.Count := 0;
+  scores[0] := 0;
+  FillChar(scores, SizeOf(scores), 0);
   if a = 0 then
   begin
     if SideIsRed then
@@ -4235,6 +4269,8 @@ begin
 
   h := Aboard.Hash;
   oldAlpha := alpha;
+  tt_value := 0;
+  tt_best_move := -2;
   if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
   begin
     if (tt_best_move <> -2) then
@@ -4340,6 +4376,7 @@ begin
   end;
 
   bestvalue := -INF;
+  moves.Count := 0;
   if SideIsRed then FastMakeRedMove(Aboard, moves)
   else FastMakeBlackMove(Aboard, moves);
 
@@ -4434,6 +4471,7 @@ end;
 function TForm1.AI(Aboard:Tboard;ComputerIsRed:Boolean):string;
 var a,b,c:integer; thinkstep: TMoveArray; t1: QWord; LMoveList: string;
 begin
+  a := 0; b := 0;
   LMoveList := '';
   t1 := GetTickCount64;
   board.Hash := CalculateHash(board, ComputerIsRed); // Ensure hash is synchronized
@@ -4547,14 +4585,18 @@ end;
 
 
 function TForm1.MinMaxStart(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
-var a,b,c,d,bestvalue, value, best_a_move, oldAlpha:integer; moves: TMoveArray; tempboard:Tboard;
+var a,b,bestvalue, value, best_a_move, oldAlpha:integer; moves: TMoveArray; tempboard:Tboard;
     scores: array[0..63] of Integer;
     best_paths: array of TMoveArray;
     current_path: TMoveArray;
     h: UInt64;
     tt_value, tt_best_move: Integer;
 begin
+  best_paths := nil;
+  a := 0; b := 0;
   Score(Aboard,a,b);
+  scores[0] := 0;
+  FillChar(scores, SizeOf(scores), 0);
   if a = 0 then
   begin
     if SideIsRed then
@@ -4574,6 +4616,8 @@ begin
 
   h := Aboard.Hash;
   oldAlpha := alpha;
+  tt_value := 0;
+  tt_best_move := -2;
   if LookupTT(h, depth, alpha, beta, tt_value, tt_best_move) then
   begin
     if (tt_best_move <> -2) then
@@ -4591,11 +4635,13 @@ begin
   end;
 
   bestvalue := -INF;
+  moves.Count := 0;
   if SideIsRed then FastMakeRedMove(Aboard, moves)
   else FastMakeBlackMove(Aboard, moves);
 
   if moves.Count > 1 then
   begin
+    FillChar(scores, SizeOf(scores), 0);
     if depth > 4 then
     begin
       for a := 0 to moves.Count - 1 do
@@ -4646,6 +4692,7 @@ begin
   end;
 
   tempboard := Aboard;
+  best_a_move := -2;
   for a := 0 to moves.Count - 1 do
   begin
     tempboard := Aboard;
@@ -4698,6 +4745,7 @@ function TForm1.ThinkNumber(Aboard:Tboard;SideIsRed:Boolean;depth:integer):integ
 var a,b:integer; moves: TMoveArray; tempboard:Tboard;
 begin
   Result := 0;
+  a := 0; b := 0;
   Score(Aboard, a, b);
 
   if a = 0 then exit;
@@ -4705,6 +4753,7 @@ begin
 
   if (depth <= 0) or (a + b > 63) then exit;
 
+  moves.Count := 0;
   if SideIsRed then FastMakeRedMove(Aboard, moves)
   else FastMakeBlackMove(Aboard, moves);
 
@@ -4758,6 +4807,7 @@ begin
    s:='';
    for a := 0 to StepListBox.Count - 1 do
    begin
+     t := '';
      if copy(StepListBox.Items[a],1,3) = 'Red'  then
        t := copy(StepListBox.Items[a],5,3)
      else if copy(StepListBox.Items[a],1,5) = 'Black'  then
