@@ -1078,7 +1078,10 @@ begin
     if LocalTime <> '' then AIUsedTimeLabel.Caption := LocalTime;
     if LocalThinkStep <> '' then
     begin
-      ThinkstepEdit.Text := LocalThinkStep;
+      if LocalScore <> '' then
+        ThinkstepEdit.Text := LocalScore + ': ' + LocalThinkStep
+      else
+        ThinkstepEdit.Text := LocalThinkStep;
     end;
     if LocalAppendList.Count > 0 then
     begin
@@ -1341,12 +1344,11 @@ else begin
     end;
   end;
 
-  // Take only the moves that tied for the best score, then take top half of those
-  i := 0;
-  while (i < templist.Count) and (mutiscores[i] = mutiscores[0]) do Inc(i);
-
-  if i > 1 then i := i div 2 + 1; // Match the "top half of ties" logic
-  if i = 0 then i := 1;
+  // Take the top half of all sorted moves based on the heuristic
+  if templist.Count > 4 then
+    i := templist.Count div 2 + 1 // Match the "top half of ties" logic
+  else
+    i := templist.Count;
 
   for a := 0 to i - 1 do
   begin
