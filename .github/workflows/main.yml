@@ -26,6 +26,12 @@ jobs:
         run: |
           lazbuild --cpu=x86_64 --os=win64 SumAntiReversi8x8.lpi
 
+      - name: Run Auto Test
+        run: |
+          ./SumAntiReversi8x8.exe --test > test_output.txt 2>&1 || true
+          cat test_output.txt
+          grep "bestmove -1: 6,3->1,4->4,3->2,6->5,6->5,2->4,1->6,1->5," test_output.txt
+
       - name: Archive build artifacts
         uses: actions/upload-artifact@v4
         with:

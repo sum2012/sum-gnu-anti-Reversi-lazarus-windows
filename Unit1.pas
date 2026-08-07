@@ -221,6 +221,7 @@ type
     procedure Deletechess(Sender: TObject);
     procedure ClearButtonClick(Sender: TObject);
     procedure BackButtonClick(Sender: TObject);
+    procedure RunCliTest;
     procedure Startposition2ButtonClick(Sender: TObject);
     procedure Startposition3ButtonClick(Sender: TObject);
     procedure Startposition4ButtonClick(Sender: TObject);
@@ -2736,6 +2737,49 @@ begin
   Label3.Caption:='2';
   Label4.Caption:='2';
   Updateboard;
+end;
+
+procedure TForm1.RunCliTest;
+var
+  aibestmove: TMoveArray;
+  score: Integer;
+begin
+  // Ensure CUDA is disabled for CPU-only test
+  FCudaEnabled := False;
+
+  // Setup board state from screenshot history
+  // Red to move first (FirstIsRed := True)
+  InitializeZobrist;
+  Initboard.Red := 0;
+  Initboard.Black := 0;
+  Initboard.Hash := 0;
+  board := Initboard;
+  board.Hash := CalculateHash(board, True);
+
+  // History: Red 4,5; Black 4,4; Red 5,4; Black 5,5; Red 6,5; Black 4,6;
+  // Red 3,5; Black 2,4; Red 2,5; Black 6,4; Red 5,3; Black 3,4; Red 3,3; Black 3,6
+  RedBoardUpdate(board, 36);  // 4,5
+  BlackBoardUpdate(board, 28); // 4,4
+  RedBoardUpdate(board, 29);  // 5,4
+  BlackBoardUpdate(board, 37); // 5,5
+  RedBoardUpdate(board, 38);  // 6,5
+  BlackBoardUpdate(board, 44); // 4,6
+  RedBoardUpdate(board, 35);  // 3,5
+  BlackBoardUpdate(board, 26); // 2,4
+  RedBoardUpdate(board, 34);  // 2,5
+  BlackBoardUpdate(board, 30); // 6,4
+  RedBoardUpdate(board, 21);  // 5,3
+  BlackBoardUpdate(board, 27); // 3,4
+  RedBoardUpdate(board, 19);  // 3,3
+  BlackBoardUpdate(board, 43); // 3,6
+
+  // Search depth 9
+  aibestmove.Count := 0;
+  score := MutiMinMax(board, True, 9, -INF, INF, aibestmove);
+
+  Writeln('bestmove ' + IntToStr(score) + ': ' + MoveArrayToThinkStep(aibestmove));
+
+  Application.Terminate;
 end;
 
 procedure TForm1.Startposition2ButtonClick(Sender: TObject);
