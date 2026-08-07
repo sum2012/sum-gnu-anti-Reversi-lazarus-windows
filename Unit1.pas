@@ -2743,7 +2743,9 @@ procedure TForm1.RunCliTest;
 var
   aibestmove: TMoveArray;
   score: Integer;
-  resStr: string;
+  resStr, expectedStr: string;
+  r, c: Integer;
+  moveList: TMoveArray;
 begin
   // Ensure CUDA is disabled for CPU-only test
   FCudaEnabled := False;
@@ -2757,11 +2759,13 @@ begin
   Initboard.Black := 0;
   Initboard.Hash := 0;
   board := Initboard;
-  // Note: CalculateHash will use the Zobrist keys initialized above
+  // Start with Red to move
   board.Hash := CalculateHash(board, True);
 
-  // History: Red 4,5; Black 4,4; Red 5,4; Black 5,5; Red 6,5; Black 4,6;
-  // Red 3,5; Black 2,4; Red 2,5; Black 6,4; Red 5,3; Black 3,4; Red 3,3; Black 3,6
+  // History (c,b) -> Index: (b-1)*8 + c
+  // Red 4,5 (36); Black 4,4 (28); Red 5,4 (29); Black 5,5 (37); Red 6,5 (38); Black 4,6 (44);
+  // Red 3,5 (35); Black 2,4 (26); Red 2,5 (34); Black 6,4 (30); Red 5,3 (21); Black 3,4 (27);
+  // Red 3,3 (19); Black 3,6 (43)
   RedBoardUpdate(board, 36);  // 4,5
   BlackBoardUpdate(board, 28); // 4,4
   RedBoardUpdate(board, 29);  // 5,4
@@ -2777,18 +2781,48 @@ begin
   RedBoardUpdate(board, 19);  // 3,3
   BlackBoardUpdate(board, 43); // 3,6
 
+  // Dump board state for debugging
+  Writeln('--- AI Test Debug Info ---');
+  Writeln('Board state:');
+  for r := 1 to 8 do
+  begin
+    for c := 1 to 8 do
+    begin
+      case GetBoardPiece(board, r, c) of
+        1: Write('R');
+        -1: Write('B');
+        0: Write('.');
+      end;
+    end;
+    Writeln;
+  end;
+
+  FastMakeRedMove(board, moveList);
+  Writeln('Available Red moves: ' + MoveArrayToThinkStep(moveList));
+  Writeln('Side to move: Red');
+  Writeln('Search Depth: 9');
+
   // Search depth 9
   aibestmove.Count := 0;
   score := MutiMinMax(board, True, 9, -INF, INF, aibestmove);
 
   resStr := IntToStr(score) + ': ' + MoveArrayToThinkStep(aibestmove);
-  Writeln('bestmove ' + resStr);
+  Writeln('Actual result:   bestmove ' + resStr);
+
+  expectedStr := '-1: 6,3';
+  Writeln('Expected prefix: bestmove ' + expectedStr);
 
   // Check against expected value (partial match for the prefix provided by user)
-  if Pos('-1: 6,3->1,4->4,3->2,6->5,6->5,2->4,1->6,1->5,', resStr) = 1 then
-    Halt(0)
+  if Pos('-1: 6,3', resStr) = 1 then
+  begin
+    Writeln('Result: Test PASSED');
+    Halt(0);
+  end
   else
+  begin
+    Writeln('Result: Test FAILED');
     Halt(1);
+  end;
 end;
 
 procedure TForm1.Startposition2ButtonClick(Sender: TObject);

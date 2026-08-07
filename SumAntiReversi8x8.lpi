@@ -45,7 +45,7 @@
         <EditorIndex Value="3"/>
         <TopLine Value="14"/>
         <CursorPos X="35" Y="26"/>
-        <UsageCount Value="109"/>
+        <UsageCount Value="111"/>
         <Loaded Value="True"/>
       </Unit0>
       <Unit1>
@@ -57,9 +57,10 @@
         <IsVisibleTab Value="True"/>
         <TopLine Value="22"/>
         <CursorPos X="21" Y="31"/>
-        <UsageCount Value="109"/>
+        <UsageCount Value="111"/>
         <Loaded Value="True"/>
         <LoadedDesigner Value="True"/>
+        <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit1>
       <Unit2>
         <Filename Value="cuda_utils.pas"/>
@@ -67,7 +68,7 @@
         <EditorIndex Value="2"/>
         <TopLine Value="61"/>
         <CursorPos X="7" Y="71"/>
-        <UsageCount Value="50"/>
+        <UsageCount Value="52"/>
         <Loaded Value="True"/>
       </Unit2>
       <Unit3>
@@ -179,7 +180,7 @@
         <EditorIndex Value="4"/>
         <TopLine Value="79"/>
         <CursorPos Y="87"/>
-        <UsageCount Value="13"/>
+        <UsageCount Value="14"/>
         <Loaded Value="True"/>
       </Unit17>
       <Unit18>
@@ -187,7 +188,7 @@
         <EditorIndex Value="1"/>
         <TopLine Value="4010"/>
         <CursorPos Y="4010"/>
-        <UsageCount Value="10"/>
+        <UsageCount Value="11"/>
         <Loaded Value="True"/>
       </Unit18>
     </Units>
