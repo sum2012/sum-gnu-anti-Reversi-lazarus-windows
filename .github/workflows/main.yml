@@ -28,9 +28,14 @@ jobs:
 
       - name: Run Auto Test
         run: |
-          ./SumAntiReversi8x8.exe --test > test_output.txt 2>&1 || true
-          cat test_output.txt
-          grep "bestmove -1: 6,3->1,4->4,3->2,6->5,6->5,2->4,1->6,1->5," test_output.txt
+          ./SumAntiReversi8x8.exe --test
+          if (Test-Path test_output.txt) {
+            cat test_output.txt
+            Select-String -Pattern "-1: 6,3->1,4->4,3->2,6->5,6->5,2->4,1->6,1->5," -Path test_output.txt
+          } else {
+            Write-Error "test_output.txt not found"
+            exit 1
+          }
 
       - name: Archive build artifacts
         uses: actions/upload-artifact@v4

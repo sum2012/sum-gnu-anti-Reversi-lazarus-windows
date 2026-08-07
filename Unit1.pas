@@ -2743,6 +2743,8 @@ procedure TForm1.RunCliTest;
 var
   aibestmove: TMoveArray;
   score: Integer;
+  f: TextFile;
+  resStr: string;
 begin
   // Ensure CUDA is disabled for CPU-only test
   FCudaEnabled := False;
@@ -2777,7 +2779,14 @@ begin
   aibestmove.Count := 0;
   score := MutiMinMax(board, True, 9, -INF, INF, aibestmove);
 
-  Writeln('bestmove ' + IntToStr(score) + ': ' + MoveArrayToThinkStep(aibestmove));
+  resStr := IntToStr(score) + ': ' + MoveArrayToThinkStep(aibestmove);
+  Writeln(resStr);
+
+  // Also write to file to be safe
+  AssignFile(f, 'test_output.txt');
+  Rewrite(f);
+  Writeln(f, resStr);
+  CloseFile(f);
 
   Application.Terminate;
 end;

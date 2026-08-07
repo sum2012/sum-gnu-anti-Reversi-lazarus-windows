@@ -29,5 +29,7 @@ uses
 begin
   Application.Initialize;
   Application.CreateForm(TForm1, Form1);
+  if (ParamCount > 0) and (ParamStr(1) = '--test') then
+    Form1.RunCliTest;
   Application.Run;
 end.
