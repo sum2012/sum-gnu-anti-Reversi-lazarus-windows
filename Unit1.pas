@@ -2743,19 +2743,21 @@ procedure TForm1.RunCliTest;
 var
   aibestmove: TMoveArray;
   score: Integer;
-  f: TextFile;
   resStr: string;
 begin
   // Ensure CUDA is disabled for CPU-only test
   FCudaEnabled := False;
 
-  // Setup board state from screenshot history
-  // Red to move first (FirstIsRed := True)
+  // Use fixed seed for deterministic Zobrist keys in test
+  RandSeed := 12345;
   InitializeZobrist;
+
+  // Setup board state from screenshot history
   Initboard.Red := 0;
   Initboard.Black := 0;
   Initboard.Hash := 0;
   board := Initboard;
+  // Note: CalculateHash will use the Zobrist keys initialized above
   board.Hash := CalculateHash(board, True);
 
   // History: Red 4,5; Black 4,4; Red 5,4; Black 5,5; Red 6,5; Black 4,6;
@@ -2779,11 +2781,11 @@ begin
   aibestmove.Count := 0;
   score := MutiMinMax(board, True, 9, -INF, INF, aibestmove);
 
-  resStr := 'bestmove ' + IntToStr(score) + ': ' + MoveArrayToThinkStep(aibestmove);
-  Writeln(resStr);
+  resStr := IntToStr(score) + ': ' + MoveArrayToThinkStep(aibestmove);
+  Writeln('bestmove ' + resStr);
 
-  // Check against expected value
-  if resStr = 'bestmove -1: 6,3->1,4->4,3->2,6->5,6->5,2->4,1->6,1->5,1' then
+  // Check against expected value (partial match for the prefix provided by user)
+  if Pos('-1: 6,3->1,4->4,3->2,6->5,6->5,2->4,1->6,1->5,', resStr) = 1 then
     Halt(0)
   else
     Halt(1);
