@@ -26,6 +26,10 @@ jobs:
         run: |
           lazbuild --cpu=x86_64 --os=win64 SumAntiReversi8x8.lpi
 
+      - name: Run Auto Test
+        run: |
+          ./SumAntiReversi8x8.exe --test
+
       - name: Archive build artifacts
         uses: actions/upload-artifact@v4
         with:
