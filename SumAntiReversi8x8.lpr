@@ -19,6 +19,7 @@
 program SumAntiReversi8x8;
 
 {$MODE Delphi}
+{$APPTYPE CONSOLE}
 
 uses
   Forms, Interfaces, LCLIntf,
@@ -30,6 +31,9 @@ begin
   Application.Initialize;
   Application.CreateForm(TForm1, Form1);
   if (ParamCount > 0) and (ParamStr(1) = '--test') then
+  begin
+    Writeln('Starting AI Test...');
     Form1.RunCliTest;
+  end;
   Application.Run;
 end.

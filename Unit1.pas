@@ -2779,16 +2779,14 @@ begin
   aibestmove.Count := 0;
   score := MutiMinMax(board, True, 9, -INF, INF, aibestmove);
 
-  resStr := IntToStr(score) + ': ' + MoveArrayToThinkStep(aibestmove);
+  resStr := 'bestmove ' + IntToStr(score) + ': ' + MoveArrayToThinkStep(aibestmove);
   Writeln(resStr);
 
-  // Also write to file to be safe
-  AssignFile(f, 'test_output.txt');
-  Rewrite(f);
-  Writeln(f, resStr);
-  CloseFile(f);
-
-  Application.Terminate;
+  // Check against expected value
+  if resStr = 'bestmove -1: 6,3->1,4->4,3->2,6->5,6->5,2->4,1->6,1->5,1' then
+    Halt(0)
+  else
+    Halt(1);
 end;
 
 procedure TForm1.Startposition2ButtonClick(Sender: TObject);
