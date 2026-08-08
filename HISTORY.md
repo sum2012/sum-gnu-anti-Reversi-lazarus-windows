@@ -1,4 +1,6 @@
-v0.8 Add Nvidia Cuda 12.6 support
+v0.81 Remove CUDA support and optimate CPU
+
+v0.8 Add CUDA support
 
 v0.7:fix bug
 v0.7 preview:a mult core sopport preview by lazarus(not delphi),known have a think bug
@@ -16,10 +18,11 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
+along with this program.  If not, see [http://www.gnu.org/licenses/](http://www.gnu.org/licenses/).
 
 forum https://github.com/sum2012/sum-gnu-anti-Reversi-lazarus-windows
 
-Sum GNU Anti Reversi 8x8 program is an anti Reversi of the classic game "Reversi". 
+Sum GNU Anti Reversi 8x8 program is an anti Reversi of the classic game "Reversi".
 The player who has more pieces on the board when the game is finished, loses the game.
 The program use half score cut method to make it to think faster.
+

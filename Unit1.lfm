@@ -4,7 +4,7 @@ object Form1: TForm1
   Top = 50
   Width = 1150
   BorderIcons = [biSystemMenu, biMinimize]
-  Caption = 'Sum GNU Anti Reversi version v0.8'
+  Caption = 'Sum GNU Anti Reversi version v0.81'
   ClientHeight = 863
   ClientWidth = 1150
   Color = clBtnFace
@@ -12958,14 +12958,6 @@ object Form1: TForm1
     Caption = 'Time: 0s'
     ParentColor = False
   end
-  object GpuEvalLabel: TLabel
-    Left = 48
-    Height = 20
-    Top = 528
-    Width = 101
-    Caption = 'GPU Disabled'
-    ParentColor = False
-  end
   object Redlabel: TLabel
     Left = 792
     Height = 20
@@ -13205,18 +13197,6 @@ object Form1: TForm1
       Caption = 'To java board'
       GroupIndex = 1
       OnClick = TojavaboardbuttonClick
-    end
-    object CudaMenu: TMenuItem
-      Caption = 'CUDA option'
-      object CudaEnabledMenuItem: TMenuItem
-        AutoCheck = True
-        Caption = 'Enable CUDA'
-        OnClick = CudaEnabledMenuItemClick
-      end
-      object CudaStressTest: TMenuItem
-        Caption = 'CUDA Stress Test'
-        OnClick = CudaStressTestClick
-      end
     end
     object RuleButton: TMenuItem
       Caption = 'Rule'
