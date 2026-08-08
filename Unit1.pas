@@ -1452,6 +1452,7 @@ begin
        RedboardUpdate(Aboard,move1)
      Else
        Blackboardupdate(Aboard,move1);
+     Aboard.Hash := Aboard.Hash xor FZobristSide;
      mutitscore := -MinMax(Aboard,mutiSideIsRed,mutidepth+1, -INF, INF, path);
   end;
 
@@ -3703,9 +3704,9 @@ begin
       exit;
     end;
 
-    current_path.Count := 0;
-    current_path.Moves[0] := -1; // PASS
-    current_path.Count := 1;
+    current_path := aithinkstep;
+    current_path.Moves[current_path.Count] := -1; // PASS
+    inc(current_path.Count);
     Aboard.Hash := Aboard.Hash xor FZobristSide;
     Result := -MinMaxStart(Aboard, Not SideIsRed, depth, -beta, -alpha, current_path);
     aithinkstep := current_path;
@@ -3720,9 +3721,9 @@ begin
     if SideIsRed then RedboardUpdate(tempboard, moves.Moves[a])
     else BlackboardUpdate(tempboard, moves.Moves[a]);
 
-    current_path.Count := 0;
-    current_path.Moves[0] := moves.Moves[a];
-    current_path.Count := 1;
+    current_path := aithinkstep;
+    current_path.Moves[current_path.Count] := moves.Moves[a];
+    inc(current_path.Count);
 
     value := -MinMax(tempboard, Not SideIsRed, depth - 1, -beta, -alpha, current_path);
     if GetCurrentThreadID = MainThreadID then
