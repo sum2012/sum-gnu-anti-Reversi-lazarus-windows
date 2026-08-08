@@ -1142,7 +1142,7 @@ begin
 
 end;
 function TForm1.Muti(const ComputerisRed:Boolean):string;
-var a,b,c,tempdepth:integer; aibestmove, move: TMoveArray;
+var a,b,c,tempdepth:integer; move: TMoveArray;
 function test(const depth:integer;const cuted:Boolean;const fullthink:boolean):string;
 var a,b,i,j,bestscore, temp_idx, best_count:integer; templist, templist2: TMoveArray; OneDepthSideisRed:boolean; bestmove:string; move: TMoveArray;
     sort_indices: array of Integer;
@@ -3346,12 +3346,10 @@ begin
 end;
 
 function TForm1.MinMax(Aboard:Tboard;SideIsRed:Boolean;depth:integer;alpha, beta: integer;var aithinkstep:TMoveArray):integer;
-var a,b,c,bestvalue, value, node_val, branch_best, best_a_move:integer;
-    moves, child_moves, grandchild_moves: TMoveArray;
-    tempboard, tempboard2: Tboard;
+var a,b,bestvalue, value, best_a_move:integer;
+    moves: TMoveArray;
+    tempboard: Tboard;
     oldaithinkstep, bestaithinkstep: TMoveArray;
-    batch_boards: array of Tboard;
-    batch_scores: array of Integer;
     scores: array[0..63] of Integer;
     h: UInt64;
     oldAlpha, tt_value, tt_best_move: Integer;
@@ -3360,8 +3358,6 @@ begin
   a := 0; b := 0;
   Score(Aboard,a,b);
   moves.Count := 0;
-  child_moves.Count := 0;
-  grandchild_moves.Count := 0;
   scores[0] := 0;
   FillChar(scores, SizeOf(scores), 0);
   if a = 0 then
@@ -3495,10 +3491,9 @@ begin
 end;
 
 function TForm1.AI(Aboard:Tboard;ComputerIsRed:Boolean):string;
-var a,b,c:integer; thinkstep: TMoveArray; t1: QWord; LMoveList: string;
+var a,b,c:integer; thinkstep: TMoveArray; t1: QWord;
 begin
   a := 0; b := 0;
-  LMoveList := '';
   t1 := GetTickCount64;
   board.Hash := CalculateHash(board, ComputerIsRed); // Ensure hash is synchronized
   CallSyncUpdateAIUI('', '', '', True, False);
