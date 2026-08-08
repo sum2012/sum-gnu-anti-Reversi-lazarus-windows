@@ -1315,22 +1315,24 @@ begin
 
   a := 0; b := 0;
   score(board,a,b);
-  tempdepth:= strToint(Endgamedepth.text);
-  if a+b + tempdepth >= 64 then
-    tempdepth:= 64-a-b
-  else
-    tempdepth:= strToint(Nornaldepth.Text);
-
-  if (c >= 4) and (a + b < 46)  then
+  if a+b + strToint(Endgamedepth.text) >= 64 then
   begin
-    tempdepth:= tempdepth-4;
-    test(tempdepth,true,false);
-    tempdepth:= tempdepth + 2;
-    Result:=test(tempdepth,false,false);
+    tempdepth:= 64-a-b;
+    Result:=test(tempdepth,true,True);
   end
   else begin
-    tempdepth := tempdepth - 2;
-    Result:=test(tempdepth,true,True);
+    tempdepth:= strToint(Nornaldepth.Text);
+    if (c >= 4) and (a + b < 46)  then
+    begin
+      tempdepth:= tempdepth-4;
+      test(tempdepth,true,false);
+      tempdepth:= tempdepth + 2;
+      Result:=test(tempdepth,false,false);
+    end
+    else begin
+      tempdepth := tempdepth - 2;
+      Result:=test(tempdepth,true,True);
+    end;
   end;
   mutisteplist.Count := 0;
   mutitemplist.Count := 0;
