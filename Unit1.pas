@@ -28,7 +28,6 @@ uses
 
 const
   inf = 10000;
-  TT_SIZE = 1 shl 24;
   TT_EXACT = 0;
   TT_LOWERBOUND = 1;
   TT_UPPERBOUND = 2;
@@ -185,8 +184,15 @@ type
     StartpositionButton: TMenuItem;
     Startposition6utton: TMenuItem;
     Tojavaboardbutton: TMenuItem;
+    TTSizeMenuItem: TMenuItem;
+    TTLevel1Button: TMenuItem;
+    TTLevel2Button: TMenuItem;
+    TTLevel3Button: TMenuItem;
+    TTLevel4Button: TMenuItem;
+    TTLevel5Button: TMenuItem;
     Timer1: TTimer;
     procedure AboutButtonClick(Sender: TObject);
+    procedure TTLevelClick(Sender: TObject);
     procedure NornalDepthChange(Sender: TObject);
     procedure Timer1Timer(Sender: TObject);
     procedure ComputerFirstButtonClick(Sender: TObject);
@@ -224,6 +230,7 @@ type
     procedure Startposition6uttonClick(Sender: TObject);
     procedure TojavaboardbuttonClick(Sender: TObject);
   private
+      FTTSize: Cardinal;
 //      mutistep:Boolean;
 //      mutiscore:Integer;
       mutidepth:integer;
@@ -402,12 +409,34 @@ begin
     FZobristBlack[i] := Random64;
   end;
   FZobristSide := Random64;
-  SetLength(FTranspositionTable, TT_SIZE);
-  for i := 0 to TT_SIZE - 1 do
+  FTranspositionTable := nil;
+  // Force Windows to reclaim memory from the working set
+  SetProcessWorkingSetSize(GetCurrentProcess, PtrUInt(-1), PtrUInt(-1));
+
+  SetLength(FTranspositionTable, FTTSize);
+  for i := 0 to FTTSize - 1 do
   begin
     FTranspositionTable[i].Hash := 0;
     FTranspositionTable[i].BestMove := -2;
   end;
+end;
+
+procedure TForm1.TTLevelClick(Sender: TObject);
+begin
+  if FAIThread <> nil then
+  begin
+    ShowMessage('Cannot change TT size while AI is thinking!');
+    Exit;
+  end;
+
+  if Sender = TTLevel1Button then FTTSize := 1 shl 24
+  else if Sender = TTLevel2Button then FTTSize := 1 shl 25
+  else if Sender = TTLevel3Button then FTTSize := 1 shl 26
+  else if Sender = TTLevel4Button then FTTSize := 1 shl 27
+  else if Sender = TTLevel5Button then FTTSize := 1 shl 28;
+
+  InitializeZobrist;
+  CallSyncUpdateAIUI('', '', 'TT Size updated to ' + IntToStr(FTTSize), True, True);
 end;
 
 procedure TForm1.UpdateHash(var AHash: UInt64; PieceIdx: Integer; PieceType: Integer);
@@ -446,7 +475,7 @@ var
   Index: Cardinal;
   DataSignature: UInt64;
 begin
-  Index := Hash and (TT_SIZE - 1);
+  Index := Hash and (FTTSize - 1);
   // Depth-preferred replacement
   if (FTranspositionTable[Index].Hash = 0) or (FTranspositionTable[Index].Depth <= Depth) then
   begin
@@ -472,7 +501,7 @@ var
   DataSignature: UInt64;
 begin
   Result := False;
-  Index := Hash and (TT_SIZE - 1);
+  Index := Hash and (FTTSize - 1);
 
   // Read the entire entry into a local copy. This might be a "torn read"
   // if another thread is writing to it simultaneously.
@@ -1103,6 +1132,7 @@ end;
 
 procedure TForm1.FormCreate(Sender: TObject);
 begin
+  FTTSize := 1 shl 24;
   DetectCPUFeatures;
   FMetricsAppendList := TStringList.Create;
   Timer1.Interval := 100; // Faster updates for decoupled UI

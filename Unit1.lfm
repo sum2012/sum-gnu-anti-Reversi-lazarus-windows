@@ -13193,6 +13193,41 @@ object Form1: TForm1
         OnClick = FinishSetupboardClick
       end
     end
+    object TTSizeMenuItem: TMenuItem
+      Caption = 'TT Size'
+      GroupIndex = 1
+      object TTLevel1Button: TMenuItem
+        AutoCheck = True
+        Caption = 'Level 1'
+        Checked = True
+        RadioItem = True
+        OnClick = TTLevelClick
+      end
+      object TTLevel2Button: TMenuItem
+        AutoCheck = True
+        Caption = 'Level 2'
+        RadioItem = True
+        OnClick = TTLevelClick
+      end
+      object TTLevel3Button: TMenuItem
+        AutoCheck = True
+        Caption = 'Level 3'
+        RadioItem = True
+        OnClick = TTLevelClick
+      end
+      object TTLevel4Button: TMenuItem
+        AutoCheck = True
+        Caption = 'Level 4'
+        RadioItem = True
+        OnClick = TTLevelClick
+      end
+      object TTLevel5Button: TMenuItem
+        AutoCheck = True
+        Caption = 'Level 5'
+        RadioItem = True
+        OnClick = TTLevelClick
+      end
+    end
     object Tojavaboardbutton: TMenuItem
       Caption = 'To java board'
       GroupIndex = 1
